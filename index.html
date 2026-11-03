@@ -2000,7 +2000,7 @@
         badge: "Top Best Seller",
         featuredInHero: true,
         description: "Daging sapi pilihan berpadu bumbu yakiniku khas Jepang yang gurih manis, onsen egg setengah matang & minyak truffle harum.",
-        image: "/src/assets/images/regenerated_image_1793667900189.jpg",
+        image: "https://images.unsplash.com/photo-1553621042-f6e147245754?auto=format&fit=crop&w=600&q=80",
         options: [
           {
             name: "Pilihan Telur",
@@ -2143,7 +2143,7 @@
         price: 15000,
         rating: 4.8,
         reviewsCount: 165,
-        description: "Teh hijau seduh dengan beras cokelat panggang harum menenangkan khas kedai sushi Tokyo.",
+        description: "Teh hijau seduh dengan beras cokelat panggang harum menenangkan kedai sushi Tokyo.",
         image: "https://images.unsplash.com/photo-1576092768241-dec231879fc3?auto=format&fit=crop&w=600&q=80",
         options: [
           {
@@ -2203,7 +2203,7 @@
       loadAdminConfig();
       loadAdminCategories();
       loadAdminExtras();
-      loadAdminProducts(); // Termasuk auto-migration variasi & hero featured menu!
+      loadAdminProducts(); 
       loadCartFromStorage();
 
       applyStoreConfigToUI();
@@ -2217,14 +2217,11 @@
       updateCartUI();
       updateAdminAuthButtonUI();
       updateKitchenStatusUI();
-      setInterval(updateKitchenStatusUI, 60000); // Periksa status operasional setiap 1 menit
+      setInterval(updateKitchenStatusUI, 60000);
 
       if (window.lucide) window.lucide.createIcons();
     });
 
-    /**
-     * FORMAT NOMOR TELEPON MENJADI NOMOR BIASA DENGAN STRIP (0817-0808-609)
-     */
     function formatPhoneNumber(numStr) {
       if (!numStr) return "0817-0808-609";
       let clean = numStr.toString().replace(/[^0-9]/g, "");
@@ -2234,21 +2231,12 @@
       if (!clean.startsWith("0")) {
         clean = "0" + clean;
       }
-      if (clean.length === 11) {
-        return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8)}`;
-      } else if (clean.length === 12) {
-        return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8)}`;
-      } else if (clean.length === 10) {
-        return `${clean.slice(0, 4)}-${clean.slice(4, 7)}-${clean.slice(7)}`;
-      } else if (clean.length > 8) {
+      if (clean.length === 11 || clean.length === 12 || clean.length === 10 || clean.length > 8) {
         return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8)}`;
       }
       return clean;
     }
 
-    /**
-     * APLIKASIKAN DATA TOKO KE ELEMEN-ELEMEN UI
-     */
     function applyStoreConfigToUI() {
       const topName = document.getElementById("topBarStoreName");
       const topTagline = document.getElementById("topBarTagline");
@@ -2292,9 +2280,6 @@
       if (window.lucide) window.lucide.createIcons();
     }
 
-    /**
-     * PENGECEKAN STATUS OPERASIONAL DAPUR (BUKA / TUTUP REAL-TIME)
-     */
     function getStoreCurrentTimeMinutes() {
       try {
         const d = new Date();
@@ -2319,8 +2304,6 @@
 
     function checkKitchenStatus(hoursText) {
       const text = hoursText || CONFIG.hours || "Lunch: 11.00 - 15.00 WIB | Dinner: 17.00 - 22.00 WIB";
-      
-      // Ekstrak semua rentang waktu jam:menit - jam:menit (misal 11.00 - 15.00 atau 17:00 - 22:00)
       const regex = /(\d{1,2})[:.](\d{2})\s*(?:[-‚Äì‚Äî]|sampai|to)\s*(\d{1,2})[:.](\d{2})/gi;
       const ranges = [];
       let match;
@@ -2336,7 +2319,6 @@
       }
 
       if (ranges.length === 0) {
-        // Rentang default jika pola jam tidak ditemukan: 11.00 - 22.00
         ranges.push({ start: 11 * 60, end: 22 * 60 });
       }
 
@@ -2344,17 +2326,11 @@
 
       for (const r of ranges) {
         if (r.start <= r.end) {
-          if (nowMin >= r.start && nowMin <= r.end) {
-            return true;
-          }
+          if (nowMin >= r.start && nowMin <= r.end) return true;
         } else {
-          // Melintasi tengah malam (misal 18.00 - 02.00)
-          if (nowMin >= r.start || nowMin <= r.end) {
-            return true;
-          }
+          if (nowMin >= r.start || nowMin <= r.end) return true;
         }
       }
-
       return false;
     }
 
@@ -2388,9 +2364,6 @@
       }
     }
 
-    /**
-     * RENDER TAB KATEGORI
-     */
     function renderCategoryTabs() {
       const container = document.getElementById("categoryTabsContainer");
       const footerContainer = document.getElementById("footerCategoryList");
@@ -2439,9 +2412,6 @@
       }
     }
 
-    /**
-     * RENDER PRODUK KE GRID (TAMPILAN JEPANG RAPAT & JELAS ADA VARIASI)
-     */
     function renderProducts() {
       const grid = document.getElementById("productGrid");
       const emptyState = document.getElementById("emptyState");
@@ -2493,7 +2463,6 @@
         return `
           <div class="bg-white rounded-xl border border-stone-200/90 shadow-2xs hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col overflow-hidden group">
             
-            <!-- Foto Produk -->
             <div class="relative w-full h-36 sm:h-44 bg-stone-100 overflow-hidden cursor-pointer" onclick="handleProductClick('${item.id}')">
               <img 
                 src="${item.image}" 
@@ -2522,10 +2491,8 @@
               ` : ''}
             </div>
 
-            <!-- Konten Menu -->
             <div class="p-3 sm:p-3.5 flex-1 flex flex-col justify-between">
               <div>
-                <!-- Rating -->
                 <div class="flex items-center gap-1 mb-1 text-[11px]">
                   <svg class="w-3.5 h-3.5 fill-amber-400 text-amber-400" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
                   <span class="font-bold text-stone-900">${item.rating || 4.9}</span>
@@ -2540,7 +2507,6 @@
                   ${item.description}
                 </p>
 
-                <!-- Cuplikan Variasi pada Kartu -->
                 ${hasOptions ? `
                   <div class="mt-1 text-[10px] text-amber-800 bg-amber-50/80 px-1.5 py-0.5 rounded border border-amber-200/50 line-clamp-1">
                     ${item.options.map(o => o.name).join(" ¬∑ ")}
@@ -2548,7 +2514,6 @@
                 ` : ''}
               </div>
 
-              <!-- Baris Harga & Aksi -->
               <div class="pt-2.5 mt-2.5 border-t border-stone-100 flex items-center justify-between gap-2">
                 <span class="font-mono font-bold text-xs sm:text-sm text-jp-crimson tabular-nums">
                   ${currencyFormatter.format(item.price)}
@@ -2573,9 +2538,6 @@
       if (window.lucide) window.lucide.createIcons();
     }
 
-    /**
-     * FILTER KATEGORI
-     */
     function filterCategory(cat) {
       activeCategory = cat;
       document.querySelectorAll(".cat-tab").forEach(btn => {
@@ -2590,9 +2552,6 @@
       renderProducts();
     }
 
-    /**
-     * PENCARIAN
-     */
     function handleSearch(val) {
       searchQuery = val;
       const clearBtn = document.getElementById("clearSearchBtn");
@@ -2627,11 +2586,6 @@
       filterCategory("semua");
     }
 
-    /**
-     * =========================================================================
-     * MODAL PILIHAN VARIASI MENU KONSUMEN (INTERAKTIF & JELAS)
-     * =========================================================================
-     */
     function handleProductClick(productId) {
       const product = PRODUCTS.find(p => p.id === productId);
       if (!product) return;
@@ -2663,12 +2617,10 @@
       if (basePrice) basePrice.textContent = currencyFormatter.format(product.price);
       if (notesInput) notesInput.value = "";
 
-      // Tampilkan deskripsi menu secara utuh tanpa terpotong
       if (descEl) {
         descEl.textContent = product.description || "Sajian lezat autentik dengan bahan segar berkualitas tinggi khas Jepang.";
       }
 
-      // Kategori & Rating
       if (catEl) {
         const catObj = CATEGORIES.find(c => c.id === product.category);
         catEl.textContent = catObj ? catObj.name : "Menu Pilihan";
@@ -2677,11 +2629,9 @@
         ratingEl.innerHTML = `‚òÖ ${product.rating || 4.9} <span class="text-stone-300 font-normal">(${product.reviewsCount || 100}+ ulasan)</span>`;
       }
 
-      // Reset kuantitas ke 1
       const qtyDisplay = document.getElementById("varQuantityDisplay");
       if (qtyDisplay) qtyDisplay.textContent = "1";
 
-      // Default pilih opsi pertama untuk setiap grup
       if (Array.isArray(product.options)) {
         product.options.forEach(optGroup => {
           if (optGroup.choices && optGroup.choices.length > 0) {
@@ -2690,7 +2640,6 @@
         });
       }
 
-      // Render opsi-opsi variasi dengan pill tombol interaktif
       renderVariationModalOptionsUI();
       updateVariationModalTotal();
 
@@ -2724,7 +2673,7 @@
         return;
       }
 
-      container.innerHTML = currentVariationProduct.options.map((optGroup, gIdx) => {
+      container.innerHTML = currentVariationProduct.options.map((optGroup) => {
         const selectedVal = currentSelectedOptions[optGroup.name];
 
         return `
@@ -2808,9 +2757,6 @@
       closeVariationModal();
     }
 
-    /**
-     * CART OPERATIONS
-     */
     function addItemToCart(product, quantity, selectedOptions, notes) {
       let unitPrice = product.price;
       if (selectedOptions) {
@@ -2913,7 +2859,6 @@
         return;
       }
 
-      // Tampilkan konfirmasi inline yang aman di iframe (tanpa modal popup browser window.confirm)
       container.innerHTML = `
         <div class="inline-flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded text-[10px] shadow-xs">
           <span class="text-rose-700 font-bold">Hapus semua?</span>
@@ -2953,14 +2898,10 @@
       showToast("Keranjang berhasil dikosongkan");
     }
 
-    /**
-     * UPDATE UI KERANJANG
-     */
     function updateCartUI() {
       const totalCount = cart.reduce((acc, item) => acc + item.quantity, 0);
       const menuSubtotal = cart.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
 
-      // Hitung total ekstra / pelengkap yang dipilih dengan custom quantity
       let extrasTotal = 0;
       EXTRAS.forEach(e => {
         if (e.enabled !== false) {
@@ -3040,7 +2981,6 @@
                     ${item.product.name}
                   </h4>
                   
-                  <!-- Variasi Terpilih -->
                   ${optionsArray.length > 0 ? `
                     <div class="text-[10px] text-amber-900 font-semibold leading-tight my-0.5 flex flex-wrap gap-1">
                       ${optionsArray.map(([k, v]) => `<span class="bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded border border-amber-200">${v}</span>`).join("")}
@@ -3060,7 +3000,6 @@
                   </div>
                 </div>
 
-                <!-- Stepper Jumlah (-/+) Ramping -->
                 <div class="flex flex-col items-end gap-1 shrink-0">
                   <div class="flex items-center border border-stone-200 rounded-lg bg-stone-50 overflow-hidden">
                     <button 
@@ -3098,9 +3037,6 @@
       if (window.lucide) window.lucide.createIcons();
     }
 
-    /**
-     * BUKA & TUTUP MODAL KERANJANG
-     */
     function openCartModal() {
       const backdrop = document.getElementById("cartModalBackdrop");
       const drawer = document.getElementById("cartDrawerPanel");
@@ -3157,11 +3093,6 @@
       }
     }
 
-    /**
-     * =========================================================================
-     * PENGATURAN EKSTRA & PELENGKAP DI KERANJANG
-     * =========================================================================
-     */
     function renderCartExtrasUI() {
       const container = document.getElementById("cartExtrasContainer");
       if (!container) return;
@@ -3200,7 +3131,6 @@
               ` : ''}
             </div>
 
-            <!-- Custom Quantity Stepper & Input -->
             <div class="flex items-center gap-1 shrink-0">
               ${!isSelected ? `
                 <button 
@@ -3266,14 +3196,6 @@
       setCartExtraQty(extraId, newQty);
     }
 
-    function toggleCartExtra(extraId) {
-      const currentQty = Number(selectedCartExtras[extraId]) || 0;
-      setCartExtraQty(extraId, currentQty > 0 ? 0 : 1);
-    }
-
-    /**
-     * CHECKOUT VIA WHATSAPP
-     */
     function checkoutViaWhatsApp() {
       if (cart.length === 0) {
         alert("Keranjang pesanan masih kosong. Silakan pilih menu terlebih dahulu!");
@@ -3306,7 +3228,6 @@
       const totalCount = cart.reduce((acc, item) => acc + item.quantity, 0);
       const menuSubtotal = cart.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
 
-      // Hitung Ekstra & Pelengkap Terpilih dengan custom quantity
       const selectedExtrasList = [];
       let extrasTotal = 0;
       EXTRAS.forEach(e => {
@@ -3337,10 +3258,10 @@
         
         let detailLine = `${index + 1}. *${item.product.name}* (${item.quantity}x) = ${currencyFormatter.format(itemTotal)}`;
         if (optionsList) {
-          detailLine += `\n   ‚îî Varian: _${optionsList}_`;
+          detailLine += `\n    ‚îî Varian: _${optionsList}_`;
         }
         if (item.notes) {
-          detailLine += `\n   ‚îî Catatan: _${item.notes}_`;
+          detailLine += `\n    ‚îî Catatan: _${item.notes}_`;
         }
         return detailLine;
       }).join("\n\n");
@@ -3362,7 +3283,7 @@ ${extrasTotal > 0 ? `*Total Biaya Ekstra:* ${currencyFormatter.format(extrasTota
         extrasSectionText = 
 `==============================
 üç± *EKSTRA & PELENGKAP:*
-‚Ä¢ Standar (Tanpa Ekstra Tambahan)
+- Standar (Tanpa Ekstra Tambahan)
 `;
       }
 
@@ -3388,8 +3309,8 @@ ${extrasSectionText}==============================
 ${extrasTotal > 0 ? `_(Menu: ${currencyFormatter.format(menuSubtotal)} + Ekstra: ${currencyFormatter.format(extrasTotal)})_\n` : ''}==============================
 
 üë§ *DATA PEMESAN:*
-‚Ä¢ Nama: *${customerName}*
-‚Ä¢ ${orderType === 'dinein' ? 'Nomor Meja' : 'Alamat Kirim'}: *${location}*
+- Nama: *${customerName}*
+- ${orderType === 'dinein' ? 'Nomor Meja' : 'Alamat Kirim'}: *${location}*
 ${generalNotes ? `‚Ä¢ Catatan Khusus: _${generalNotes}_\n` : ''}
 Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! üôè`;
 
@@ -3400,11 +3321,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       showToast("Membuka WhatsApp ke admin restoran...", 3500);
     }
 
-    /**
-     * =========================================================================
-     * PENGATURAN LOGIN & AUTH ADMIN
-     * =========================================================================
-     */
     function handleAdminButtonClick() {
       if (adminAuth.isLoggedIn) {
         openAdminModal();
@@ -3506,11 +3422,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       showToast("Email & Password Admin berhasil diperbarui!");
     }
 
-    /**
-     * =========================================================================
-     * PANEL ADMIN UTAMA (MODAL)
-     * =========================================================================
-     */
     function openAdminModal() {
       if (!adminAuth.isLoggedIn) {
         openAdminLoginModal();
@@ -3620,9 +3531,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       showToast("Profil Toko & Titik Google Maps berhasil disimpan!");
     }
 
-    /**
-     * KATEGORI ADMIN
-     */
     function renderAdminCategoryList() {
       const container = document.getElementById("adminCategoryList");
       if (!container) return;
@@ -3699,11 +3607,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       }
     }
 
-    /**
-     * =========================================================================
-     * KELOLA MENU & PENGATURAN VARIASI DI ADMIN
-     * =========================================================================
-     */
     function renderAdminMenuList() {
       const container = document.getElementById("adminMenuList");
       if (!container) return;
@@ -3746,13 +3649,10 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
         return `
           <div class="p-2 sm:p-2.5 bg-white hover:bg-stone-50/80 rounded-xl border border-stone-200 flex flex-col gap-1.5 text-xs transition shadow-2xs">
             
-            <!-- Baris Utama: Reorder, Thumbnail, Nama, Kategori, Aksi & Hapus -->
             <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
               
-              <!-- Sisi Kiri: Tombol Urutkan (Up/Down), No, Foto Thumbnail, Nama & Kategori -->
               <div class="flex items-center gap-1.5 min-w-0 flex-1">
                 
-                <!-- Tombol Geser Posisi Menu Atas / Bawah -->
                 <div class="flex flex-col gap-0.5 shrink-0 -my-0.5">
                   <button 
                     type="button" 
@@ -3776,7 +3676,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
                 <span class="font-mono text-stone-400 text-[10px] w-4 shrink-0 text-right">${index + 1}.</span>
                 
-                <!-- Thumbnail Foto 36x36 dengan Hover Upload -->
                 <div class="relative group/thumb shrink-0">
                   <img 
                     src="${item.image}" 
@@ -3786,14 +3685,13 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                   >
                   <label 
                     class="absolute inset-0 bg-stone-950/75 hover:bg-stone-950/90 rounded-md flex items-center justify-center text-white opacity-0 group-hover/thumb:opacity-100 transition cursor-pointer p-0.5" 
-                    title="Ganti Foto (Lokal HP / Komputer)"
+                    title="Ganti Foto ke Cloud Storage"
                   >
                     <i data-lucide="camera" class="w-3.5 h-3.5 text-amber-400"></i>
                     <input type="file" accept="image/*" class="hidden" onchange="handleItemLocalPhotoUpload('${item.id}', this)">
                   </label>
                 </div>
 
-                <!-- Input Nama Menu & Pilih Kategori -->
                 <div class="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                   <input 
                     type="text" 
@@ -3815,42 +3713,37 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                 </div>
               </div>
 
-              <!-- Sisi Kanan: Tombol Banner Slideshow, Tombol Variasi, Tombol Upload Foto, Harga & Hapus -->
               <div class="flex items-center gap-1.5 shrink-0 ml-auto sm:ml-0">
                 
-                <!-- Tombol Banner Slideshow Beranda -->
                 <button 
                   type="button" 
                   onclick="toggleHeroFeatured('${item.id}')" 
                   class="px-2 py-1 rounded-md text-[10px] font-bold flex items-center gap-1 transition cursor-pointer ${item.featuredInHero ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300' : 'bg-stone-100 hover:bg-stone-200 text-stone-500 border border-stone-200'}"
-                  title="${item.featuredInHero ? 'Aktif di Banner Slideshow Beranda (Klik untuk batalkan)' : 'Tampilkan di Banner Slideshow Beranda'}"
+                  title="${item.featuredInHero ? 'Aktif di Banner Slideshow Beranda' : 'Tampilkan di Banner Slideshow Beranda'}"
                 >
                   <i data-lucide="sparkles" class="w-3 h-3 ${item.featuredInHero ? 'text-amber-600 fill-amber-500' : 'text-stone-400'}"></i>
                   <span class="hidden md:inline">${item.featuredInHero ? 'Di Banner' : '+ Banner'}</span>
                 </button>
 
-                <!-- Tombol Atur Variasi Compact -->
                 <button 
                   onclick="openAdminVariationEditor('${item.id}')" 
                   class="px-2 py-1 ${optCount > 0 ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300' : 'bg-stone-100 hover:bg-stone-200 text-stone-600 border border-stone-200'} rounded-md font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
-                  title="Atur Variasi (Matang/Mentah, Es, Telur, dll)"
+                  title="Atur Variasi"
                 >
                   <i data-lucide="sliders" class="w-3 h-3 text-amber-700"></i>
                   <span class="hidden md:inline">${optCount > 0 ? `${optCount} Variasi` : 'Atur Variasi'}</span>
                   <span class="md:hidden">${optCount > 0 ? `${optCount}V` : '+V'}</span>
                 </button>
 
-                <!-- Tombol Foto Lokal Compact -->
                 <label 
                   class="px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md text-[10px] font-bold cursor-pointer flex items-center gap-1 transition" 
-                  title="Pilih foto dari komputer atau HP"
+                  title="Upload foto ke Firebase Storage"
                 >
                   <i data-lucide="upload" class="w-2.5 h-2.5 text-emerald-600"></i>
                   <span class="hidden sm:inline">Foto</span>
                   <input type="file" accept="image/*" class="hidden" onchange="handleItemLocalPhotoUpload('${item.id}', this)">
                 </label>
 
-                <!-- Input Harga Ringkas -->
                 <div class="flex items-center gap-0.5 bg-stone-50 border border-stone-200 rounded-md px-1.5 py-0.5">
                   <span class="text-[9px] font-bold text-stone-400">Rp</span>
                   <input 
@@ -3862,7 +3755,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                   >
                 </div>
 
-                <!-- Tombol Hapus / Konfirmasi Inline Aman Iframe -->
                 ${pendingDeleteMenuId === item.id ? `
                   <div class="inline-flex items-center gap-1 bg-rose-50 border border-rose-300 px-1.5 py-0.5 rounded-md text-[10px] shrink-0">
                     <span class="text-rose-700 font-bold">Hapus?</span>
@@ -3870,7 +3762,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                       type="button" 
                       onclick="executeDeleteMenuItem('${item.id}')" 
                       class="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold cursor-pointer transition active:scale-95 shadow-2xs"
-                      title="Konfirmasi hapus menu ini"
                     >
                       Ya
                     </button>
@@ -3878,7 +3769,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                       type="button" 
                       onclick="cancelDeleteMenuItem()" 
                       class="px-1.5 py-0.5 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded font-bold cursor-pointer transition"
-                      title="Batal"
                     >
                       Batal
                     </button>
@@ -3898,7 +3788,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
             </div>
 
-            <!-- Baris Pengeditan Deskripsi Menu (Sesuai Permintaan Pengguna) -->
             <div class="pt-1.5 border-t border-stone-100 flex items-center gap-2">
               <span class="text-[10px] font-bold text-stone-500 shrink-0 flex items-center gap-1">
                 <i data-lucide="file-text" class="w-3 h-3 text-jp-crimson"></i>
@@ -3910,7 +3799,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                 onchange="updateMenuItemProp('${item.id}', 'description', this.value)" 
                 placeholder="Tulis deskripsi lezat untuk menu ini..." 
                 class="flex-1 px-2 py-1 bg-stone-50/70 hover:bg-white focus:bg-white border border-stone-200 rounded text-xs text-stone-800 focus:ring-1 focus:ring-jp-crimson focus:outline-none transition"
-                title="Ketik untuk mengubah deskripsi menu ini, lalu tekan Enter / klik di luar"
               />
             </div>
 
@@ -3921,9 +3809,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       if (window.lucide) window.lucide.createIcons();
     }
 
-    /**
-     * PENGATURAN EKSTRA & PELENGKAP DI ADMIN PANEL
-     */
     function renderAdminExtrasList() {
       const container = document.getElementById("adminExtrasList");
       if (!container) return;
@@ -3933,7 +3818,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
           <div class="text-center py-4 bg-stone-50 rounded-lg border border-dashed border-stone-200 text-stone-500 text-[11px]">
             <p>Belum ada pelengkap/ekstra yang didaftarkan.</p>
             <button onclick="resetToDefaultExtras()" class="mt-1.5 text-jp-crimson font-bold hover:underline cursor-pointer">
-              Muat Ulang Pelengkap Default (Wasabi, Shoyu, Sumpit, dll)
+              Muat Ulang Pelengkap Default
             </button>
           </div>
         `;
@@ -3950,19 +3835,16 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                 ${isEnabled ? 'checked' : ''} 
                 onchange="updateExtraProp('${extra.id}', 'enabled', this.checked)"
                 class="rounded text-jp-crimson focus:ring-0 w-3.5 h-3.5 cursor-pointer shrink-0"
-                title="${isEnabled ? 'Pelengkap Aktif (Tampil di keranjang)' : 'Pelengkap Nonaktif'}"
               />
               <input 
                 type="text" 
                 value="${extra.name}" 
                 onchange="updateExtraProp('${extra.id}', 'name', this.value)"
                 class="font-semibold text-xs text-stone-900 bg-transparent border-b border-transparent hover:border-stone-300 focus:border-jp-crimson focus:bg-white px-1 py-0.5 rounded focus:outline-none flex-1 min-w-[100px]"
-                placeholder="Nama pelengkap"
               />
             </div>
 
             <div class="flex items-center gap-1.5 shrink-0">
-              <!-- Input Harga Ekstra -->
               <div class="flex items-center gap-0.5 bg-white border border-stone-200 rounded px-1.5 py-0.5">
                 <span class="text-[9px] font-bold text-stone-400">Rp</span>
                 <input 
@@ -3970,7 +3852,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                   value="${extra.price || 0}" 
                   onchange="updateExtraProp('${extra.id}', 'price', this.value)"
                   class="font-mono font-bold text-xs ${extra.price > 0 ? 'text-amber-800' : 'text-emerald-700'} bg-transparent w-16 text-right focus:outline-none"
-                  title="Harga ekstra (0 = Gratis)"
                 />
               </div>
 
@@ -3981,7 +3862,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
               <button 
                 onclick="deleteExtra('${extra.id}')" 
                 class="p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
-                title="Hapus ekstra ini"
               >
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               </button>
@@ -3997,10 +3877,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       const form = document.getElementById("addExtraForm");
       if (!form) return;
       form.classList.toggle("hidden");
-      if (!form.classList.contains("hidden")) {
-        const input = document.getElementById("newExtraNameInput");
-        if (input) input.focus();
-      }
     }
 
     function saveNewExtra() {
@@ -4067,7 +3943,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
     }
 
     function resetToDefaultExtras() {
-      if (confirm("Kembalikan daftar pelengkap ke default (Wasabi, Shoyu, Gari, Sumpit, Togarashi)?")) {
+      if (confirm("Kembalikan daftar pelengkap ke default?")) {
         EXTRAS = JSON.parse(JSON.stringify(DEFAULT_EXTRAS));
         selectedCartExtras = {};
         saveAdminExtras();
@@ -4078,15 +3954,11 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       }
     }
 
-    /**
-     * MODAL KHUSUS EDIT VARIASI MENU (ADMIN)
-     */
     function openAdminVariationEditor(productId) {
       const product = PRODUCTS.find(p => p.id === productId);
       if (!product) return;
 
       adminEditingProduct = product;
-      // Copy array of options
       adminEditingOptions = JSON.parse(JSON.stringify(product.options || []));
 
       const backdrop = document.getElementById("adminVarEditModalBackdrop");
@@ -4117,7 +3989,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
         container.innerHTML = `
           <div class="text-center py-6 px-3 bg-stone-50 rounded-xl border border-dashed border-stone-300 text-stone-500">
             <p class="font-bold text-xs text-stone-700">Belum Ada Variasi untuk Menu Ini</p>
-            <p class="text-[11px] text-stone-500 mt-1">Pilih salah satu template di atas atau klik tombol "+ Tambah Grup Variasi Kustom".</p>
           </div>
         `;
         return;
@@ -4129,13 +4000,12 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
           <div class="p-3 bg-white border border-stone-300 rounded-xl space-y-2 relative">
             <div class="flex items-center justify-between gap-2">
               <div class="flex-1">
-                <label class="block text-stone-500 text-[10px] uppercase font-bold mb-0.5">Nama Grup Variasi (Misal: Tingkat Kematangan / Tingkat Es)</label>
+                <label class="block text-stone-500 text-[10px] uppercase font-bold mb-0.5">Nama Grup Variasi</label>
                 <input 
                   type="text" 
                   value="${group.name}" 
                   onchange="updateEditingVarGroupName(${gIdx}, this.value)"
                   class="w-full px-2 py-1 font-bold text-stone-900 border border-stone-200 rounded text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none"
-                  placeholder="Contoh: Tingkat Kematangan"
                 >
               </div>
 
@@ -4143,21 +4013,18 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
                 type="button" 
                 onclick="removeVariationGroupFromCurrentItem(${gIdx})" 
                 class="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0 mt-3"
-                title="Hapus grup variasi ini"
               >
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
               </button>
             </div>
 
             <div>
-              <label class="block text-stone-500 text-[10px] uppercase font-bold mb-0.5">Daftar Pilihan / Opsi (Pisahkan dengan tanda koma ",")</label>
+              <label class="block text-stone-500 text-[10px] uppercase font-bold mb-0.5">Daftar Pilihan (Pisahkan dengan koma ",")</label>
               <textarea 
                 rows="2" 
                 onchange="updateEditingVarGroupChoices(${gIdx}, this.value)"
                 class="w-full px-2 py-1 text-stone-800 border border-stone-200 rounded text-xs font-mono focus:ring-1 focus:ring-jp-crimson focus:outline-none"
-                placeholder="Contoh: Matang Sempurna, Setengah Matang (Medium), Mentah Segar"
               >${choicesString}</textarea>
-              <span class="text-[10px] text-stone-400">Tiap opsi dipisahkan tanda koma. Konsumen akan memilih salah satu.</span>
             </div>
           </div>
         `;
@@ -4196,12 +4063,12 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       if (template) {
         adminEditingOptions = JSON.parse(JSON.stringify(template));
         renderAdminVarEditGroupsUI();
-        showToast(`Template ${tplKey.toUpperCase()} diterapkan! Silakan sesuaikan dan klik Simpan.`);
+        showToast(`Template ${tplKey.toUpperCase()} diterapkan!`);
       }
     }
 
     function removeAllVariationsFromCurrentItem() {
-      if (confirm("Hapus semua variasi dari menu ini? Konsumen akan langsung memesan tanpa memilih variasi.")) {
+      if (confirm("Hapus semua variasi dari menu ini?")) {
         adminEditingOptions = [];
         renderAdminVarEditGroupsUI();
       }
@@ -4210,7 +4077,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
     function saveCurrentItemVariations() {
       if (!adminEditingProduct) return;
 
-      // Filter grup kosong
       const cleanOptions = adminEditingOptions
         .filter(g => g.name && g.choices && g.choices.length > 0)
         .map(g => ({
@@ -4224,7 +4090,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       renderAdminMenuList();
       renderProducts();
       closeAdminVariationEditor();
-      showToast(`Variasi menu "${adminEditingProduct.name}" berhasil disimpan!`);
+      showToast(`Variasi menu berhasil disimpan!`);
     }
 
     function closeAdminVariationEditor() {
@@ -4246,25 +4112,15 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       }
     }
 
-    /**
-     * SINKRONISASI OTOMATIS VARIASI SEMUA MENU
-     */
     function syncAllMenuVariations() {
       PRODUCTS.forEach(p => {
         if (!p.options || p.options.length === 0) {
-          if (p.category === "sushi" || p.name.toLowerCase().includes("roll") || p.name.toLowerCase().includes("salmon") || p.name.toLowerCase().includes("maki")) {
+          if (p.category === "sushi" || p.name.toLowerCase().includes("roll")) {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.sushi));
-          } else if (p.category === "minuman" || p.name.toLowerCase().includes("tea") || p.name.toLowerCase().includes("ocha") || p.name.toLowerCase().includes("latte")) {
+          } else if (p.category === "minuman") {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.minuman));
-          } else if (p.category === "donburi" || p.name.toLowerCase().includes("don") || p.name.toLowerCase().includes("bowl")) {
-            p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.donburi));
           } else {
-            p.options = [
-              {
-                name: "Pilihan Penyajian",
-                choices: ["Sajian Standar", "Saus Dipisah", "Ekstra Renyah"]
-              }
-            ];
+            p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.donburi));
           }
         }
       });
@@ -4272,7 +4128,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       saveAdminProducts();
       renderAdminMenuList();
       renderProducts();
-      showToast("Seluruh menu berhasil dilengkapi dengan opsi variasi!");
+      showToast("Seluruh menu dilengkapi opsi variasi!");
     }
 
     function updateMenuItemProp(id, prop, val) {
@@ -4290,11 +4146,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       renderHeroSlideshow();
       renderAdminSlideshowSettings();
       updateCartUI();
-      if (prop === "description") {
-        showToast(`Deskripsi "${item.name}" berhasil disimpan!`);
-      } else {
-        showToast(`Menu "${item.name}" diperbarui!`);
-      }
+      showToast("Perubahan menu disimpan!");
     }
 
     let pendingDeleteMenuId = null;
@@ -4324,7 +4176,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       renderHeroSlideshow();
       renderAdminSlideshowSettings();
       updateCartUI();
-      showToast(`Menu "${itemName}" berhasil dihapus dari katalog!`);
+      showToast(`Menu "${itemName}" berhasil dihapus!`);
     }
 
     function deleteMenuItem(id) {
@@ -4336,11 +4188,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       if (form) form.classList.toggle("hidden");
     }
 
-    /**
-     * =========================================================================
-     * PENGATURAN REORDER POSISI MENU ATAS / BAWAH & TOGGLE HERO SLIDESHOW
-     * =========================================================================
-     */
     function moveMenuItem(productId, direction) {
       const currentIndex = PRODUCTS.findIndex(p => p.id === productId);
       if (currentIndex === -1) return;
@@ -4357,7 +4204,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       renderProducts();
       renderHeroSlideshow();
       renderAdminSlideshowSettings();
-      showToast(`Posisi "${itemA.name}" digeser ${direction < 0 ? 'ke atas ‚Üë' : 'ke bawah ‚Üì'}`);
+      showToast("Urutan menu diubah");
     }
 
     function toggleHeroFeatured(productId) {
@@ -4369,7 +4216,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       renderAdminMenuList();
       renderAdminSlideshowSettings();
       renderHeroSlideshow();
-      showToast(item.featuredInHero ? `"${item.name}" aktif di Banner Slideshow!` : `"${item.name}" dilepas dari Banner Slideshow.`);
+      showToast(item.featuredInHero ? "Ditambahkan ke Banner" : "Dilepas dari Banner");
     }
 
     function renderAdminSlideshowSettings() {
@@ -4383,56 +4230,20 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       }
 
       if (featured.length === 0) {
-        container.innerHTML = `
-          <div class="text-[11px] text-stone-400 italic py-1">
-            Belum ada menu yang dipilih untuk slideshow. Semua menu akan ditampilkan otomatis atau klik tombol "‚≠ê + Banner" pada menu di bawah.
-          </div>
-        `;
+        container.innerHTML = `<span class="text-[11px] text-stone-400 italic">Belum ada menu di slideshow.</span>`;
         return;
       }
 
       container.innerHTML = featured.map((item, idx) => `
         <div class="inline-flex items-center gap-1.5 px-2 py-1 bg-stone-800 border border-stone-600 rounded-lg text-[11px] text-stone-200 shadow-xs">
           <span class="font-mono text-amber-400 text-[10px] font-bold">#${idx + 1}</span>
-          <img src="${item.image}" alt="" class="w-4 h-4 rounded object-cover" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80';">
-          <span class="font-medium truncate max-w-[130px] sm:max-w-[180px]">${item.name}</span>
-          <button 
-            type="button" 
-            onclick="toggleHeroFeatured('${item.id}')" 
-            class="text-stone-400 hover:text-rose-400 hover:bg-stone-700 transition ml-0.5 p-0.5 rounded cursor-pointer"
-            title="Keluarkan dari slideshow"
-          >
-            ‚úï
-          </button>
+          <img src="${item.image}" alt="" class="w-4 h-4 rounded object-cover">
+          <span class="medium truncate max-w-[130px]">${item.name}</span>
+          <button type="button" onclick="toggleHeroFeatured('${item.id}')" class="text-stone-400 hover:text-rose-400">‚úï</button>
         </div>
       `).join("");
     }
 
-    function selectAllForSlideshow(val) {
-      PRODUCTS.forEach(p => { p.featuredInHero = !!val; });
-      saveAdminProducts();
-      renderAdminMenuList();
-      renderAdminSlideshowSettings();
-      renderHeroSlideshow();
-      showToast(val ? "Semua menu diaktifkan di slideshow banner!" : "Semua menu dinonaktifkan dari slideshow.");
-    }
-
-    function resetDefaultSlideshowSelection() {
-      PRODUCTS.forEach((p, idx) => {
-        p.featuredInHero = (p.id === 'jp-2' || p.id === 'jp-1' || p.id === 'jp-5' || p.id === 'jp-6' || idx < 4);
-      });
-      saveAdminProducts();
-      renderAdminMenuList();
-      renderAdminSlideshowSettings();
-      renderHeroSlideshow();
-      showToast("Slideshow diatur kembali ke menu rekomendasi utama!");
-    }
-
-    /**
-     * =========================================================================
-     * HERO SHOWCASE SLIDESHOW (GAMBAR BESAR BERJALAN DINAMIS)
-     * =========================================================================
-     */
     function getHeroSlides() {
       const featured = PRODUCTS.filter(p => p.featuredInHero === true);
       if (featured.length > 0) return featured;
@@ -4445,16 +4256,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       if (!card) return;
 
       const slides = getHeroSlides();
-      if (slides.length === 0) {
-        card.innerHTML = `
-          <div class="text-center p-8 text-stone-400 text-xs">
-            <p class="font-bold text-stone-200 text-sm">Belum Ada Menu di Slideshow</p>
-            <p class="mt-1">Pilih menu melalui panel Admin > Kelola Menu.</p>
-          </div>
-        `;
-        if (dotsContainer) dotsContainer.innerHTML = "";
-        return;
-      }
+      if (slides.length === 0) return;
 
       if (heroSlideshowIndex >= slides.length) heroSlideshowIndex = 0;
       if (heroSlideshowIndex < 0) heroSlideshowIndex = slides.length - 1;
@@ -4467,54 +4269,45 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
         <img 
           src="${item.image}" 
           alt="${item.name}" 
-          class="w-[600px] max-w-full h-[500px] object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+          class="w-[600px] max-w-full h-[500px] object-cover transition-transform duration-700 ease-out"
           style="width: 600px; height: 500px;"
           loading="eager"
           onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80';"
         />
         <div class="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-black/25 pointer-events-none"></div>
 
-        <!-- Tag Kategori, Harga di Bawah Kategori, & Slide Counter -->
         <div class="absolute top-4 left-4 right-4 flex items-start justify-between pointer-events-none z-10">
-          <!-- Kategori & Harga di bawah Kategori -->
           <div class="flex flex-col items-start gap-1.5">
-            <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-jp-crimson/95 backdrop-blur-md rounded-full text-[10px] font-bold text-white uppercase tracking-wider shadow-md border border-white/10">
+            <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-jp-crimson/95 backdrop-blur-md rounded-full text-[10px] font-bold text-white uppercase">
               <span class="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse"></span>
               <span>${catName}</span>
             </div>
-
-            <!-- Tampilan Nominal Harga di bawah Kategori (tanpa teks 'Harga:') -->
             <div class="inline-flex items-center px-3 py-1 bg-stone-900/90 backdrop-blur-md rounded-xl border border-white/15 shadow-lg">
               <span class="font-mono font-black text-amber-400 text-sm sm:text-base tabular-nums">
                 ${currencyFormatter.format(item.price)}
               </span>
             </div>
           </div>
-
-          <!-- Counter Slide -->
-          <div class="px-2.5 py-1 bg-stone-900/80 backdrop-blur-md rounded-full text-[10px] font-mono font-bold text-stone-200 border border-white/10 shadow-md">
+          <div class="px-2.5 py-1 bg-stone-900/80 backdrop-blur-md rounded-full text-[10px] font-mono font-bold text-stone-200">
             ${heroSlideshowIndex + 1} / ${slides.length}
           </div>
         </div>
 
-        <!-- Info Menu & Deskripsi Utuh di Bagian Bawah -->
         <div class="absolute bottom-6 left-4 right-4 text-white z-10 pointer-events-none">
           <div class="flex items-center gap-2 mb-1.5">
-            <span class="px-2 py-0.5 bg-amber-500 text-stone-950 font-black text-[9px] rounded uppercase tracking-wider shadow-xs">
+            <span class="px-2 py-0.5 bg-amber-500 text-stone-950 font-black text-[9px] rounded uppercase">
               ${item.badge || 'Menu Favorit'}
             </span>
             <span class="text-[11px] font-semibold text-stone-300">
               ‚òÖ ${item.rating || 4.9} (${item.reviewsCount || 100}+ ulasan)
             </span>
           </div>
-
           <div>
-            <h3 class="font-display font-bold text-lg sm:text-2xl text-white tracking-tight leading-snug drop-shadow-sm">
+            <h3 class="font-display font-bold text-lg sm:text-2xl text-white tracking-tight leading-snug">
               ${item.name}
             </h3>
-            <!-- Deskripsi menu ditampilkan secara utuh tanpa line-clamp -->
-            <p class="text-[11px] sm:text-xs text-stone-200 mt-1 leading-relaxed drop-shadow-xs">
-              ${item.description || 'Sajian lezat autentik dengan bahan segar berkualitas tinggi khas Jepang.'}
+            <p class="text-[11px] sm:text-xs text-stone-200 mt-1 leading-relaxed">
+              ${item.description || 'Sajian lezat autentik khas Jepang.'}
             </p>
           </div>
         </div>
@@ -4529,8 +4322,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
             type="button" 
             onclick="goToHeroSlide(${idx})" 
             class="transition-all duration-300 cursor-pointer ${idx === heroSlideshowIndex ? 'w-5 h-2 bg-jp-crimson rounded-full shadow-xs' : 'w-2 h-2 bg-white/40 hover:bg-white/80 rounded-full'}"
-            title="Geser ke slide ${idx + 1}: ${s.name}"
-            aria-label="Slide ${idx + 1}"
           ></button>
         `).join("");
       }
@@ -4582,96 +4373,69 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       startHeroSlideshowTimer();
     }
 
-    function pauseHeroSlideshow() {
-      isHeroSlideshowPaused = true;
-    }
-
-    function resumeHeroSlideshow() {
-      isHeroSlideshowPaused = false;
-    }
-
     /**
      * =========================================================================
-     * PENGOLAHAN FOTO GAMBAR LOKAL (KAMERA / GALERI / FILE KOMPUTER)
+     * PENGOLAHAN & UPLOAD FOTO KE FIREBASE STORAGE (CLOUD)
      * =========================================================================
      */
-    function processLocalImageFile(file, callback) {
+    async function uploadImageToFirebaseStorage(file, pathFolder = 'menu_images/') {
       if (!file || !file.type.startsWith("image/")) {
         alert("Silakan pilih file gambar yang valid (JPG, PNG, atau WEBP)!");
-        return;
+        return null;
       }
 
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const img = new Image();
-        img.onload = function() {
-          // Kompresi cerdas via Canvas: max dimension 800px untuk menghemat penyimpanan localStorage
-          const maxDim = 800;
-          let width = img.width;
-          let height = img.height;
+      try {
+        showToast("Sedang mengunggah foto ke Cloud Firebase...", 3000);
+        
+        const uniqueFileName = pathFolder + Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const storageRef = ref(storage, uniqueFileName);
 
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
-
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0, width, height);
-
-          // Output JPEG 0.82 menghasilkan gambar jernih (~40KB - 70KB) yang pas di memori
-          const compressedDataUrl = canvas.toDataURL("image/jpeg", 0.82);
-          callback(compressedDataUrl);
-        };
-        img.onerror = function() {
-          alert("Gagal membaca berkas gambar. Pastikan format file didukung!");
-        };
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(file);
+        const snapshot = await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(snapshot.ref);
+        return downloadURL;
+      } catch (error) {
+        console.error("Gagal mengunggah foto ke Firebase Storage:", error);
+        alert("Gagal mengunggah foto ke server cloud.");
+        return null;
+      }
     }
 
-    function handleNewMenuLocalFile(input) {
+    async function handleNewMenuLocalFile(input) {
       const file = input.files && input.files[0];
       if (!file) return;
 
-      processLocalImageFile(file, (dataUrl) => {
+      const downloadURL = await uploadImageToFirebaseStorage(file);
+      if (downloadURL) {
         const imgPreview = document.getElementById("newMenuImgPreview");
         const urlInput = document.getElementById("newMenuImage");
         const badge = document.getElementById("newMenuPhotoSourceBadge");
 
-        if (imgPreview) imgPreview.src = dataUrl;
-        if (urlInput) urlInput.value = dataUrl;
-        if (badge) badge.textContent = `üìÅ ${file.name.substring(0, 16)} (Lokal)`;
+        if (imgPreview) imgPreview.src = downloadURL;
+        if (urlInput) urlInput.value = downloadURL;
+        if (badge) badge.textContent = `‚òÅÔ∏è Tersimpan di Cloud`;
 
-        showToast("Foto lokal berhasil diunggah & siap disimpan!");
-      });
+        showToast("Foto berhasil diunggah ke Cloud Firebase!");
+      }
     }
 
-    function handleItemLocalPhotoUpload(productId, input) {
+    async function handleItemLocalPhotoUpload(productId, input) {
       const file = input.files && input.files[0];
       if (!file) return;
 
       const item = PRODUCTS.find(p => p.id === productId);
       if (!item) return;
 
-      processLocalImageFile(file, (dataUrl) => {
-        item.image = dataUrl;
+      const downloadURL = await uploadImageToFirebaseStorage(file);
+      if (downloadURL) {
+        item.image = downloadURL;
         saveAdminProducts();
         renderAdminMenuList();
         renderProducts();
         renderHeroSlideshow();
         renderAdminSlideshowSettings();
         updateCartUI();
-        showToast(`Foto lokal untuk "${item.name}" berhasil diperbarui!`);
-      });
+        showToast(`Foto cloud untuk "${item.name}" berhasil diperbarui!`);
+      }
     }
 
     function updateImagePreview(url) {
@@ -4756,7 +4520,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       if (badge) badge.textContent = "Foto Default";
       toggleAddMenuForm();
 
-      showToast(`Menu "${name}" beserta foto lokal & variasi berhasil ditambahkan!`);
+      showToast(`Menu "${name}" berhasil ditambahkan!`);
     }
 
     function resetToDefaultProducts() {
@@ -4776,13 +4540,8 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       }
     }
 
-    /**
-     * LOCALSTORAGE PERSISTENCE DENGAN AUTO-MIGRATION
-     */
     function saveAdminAuth() {
-      try {
-        localStorage.setItem("shinzan_admin_auth", JSON.stringify(adminAuth));
-      } catch (e) {}
+      try { localStorage.setItem("shinzan_admin_auth", JSON.stringify(adminAuth)); } catch (e) {}
     }
 
     function loadAdminAuth() {
@@ -4812,23 +4571,13 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
         const saved = localStorage.getItem("shinzan_admin_config");
         if (saved) {
           CONFIG = { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
-          // Otomatis perbarui nama toko ke Utori Sushi & Donburi jika masih tersimpan nama lama
           if (CONFIG.restaurantName && CONFIG.restaurantName.includes("Shinzan")) {
             CONFIG.restaurantName = "Utori Sushi & Donburi (ÁæΩÈ≥•)";
             saveAdminConfig();
           }
-          // Otomatis perbarui alamat lama Senopati ke alamat Bandung Utori Sushi & titik Maps
           if (!CONFIG.address || CONFIG.address.includes("Senopati")) {
             CONFIG.address = DEFAULT_CONFIG.address;
             CONFIG.mapsUrl = DEFAULT_CONFIG.mapsUrl;
-            saveAdminConfig();
-          }
-          if (!CONFIG.mapsUrl || CONFIG.mapsUrl === "https://maps.google.com") {
-            CONFIG.mapsUrl = DEFAULT_CONFIG.mapsUrl;
-            saveAdminConfig();
-          }
-          if (!CONFIG.whatsappNumber || CONFIG.whatsappNumber === "6281234567890") {
-            CONFIG.whatsappNumber = DEFAULT_CONFIG.whatsappNumber;
             saveAdminConfig();
           }
         }
@@ -4876,37 +4625,30 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
       let needsSave = false;
 
-      // 1. Migrasi update menu Yakiniku Don jika masih data lama Truffle Gyudon
       const yakinikuItem = PRODUCTS.find(p => p.id === "jp-2" || p.name === "Truffle Gyudon Beef Bowl");
       if (yakinikuItem) {
         if (yakinikuItem.name === "Truffle Gyudon Beef Bowl") {
           yakinikuItem.name = "Yakiniku Don";
           needsSave = true;
         }
-        if (!yakinikuItem.image || yakinikuItem.image.includes("photo-1553621042-f6e147245754")) {
-          yakinikuItem.image = "/src/assets/images/regenerated_image_1793667900189.jpg";
-          needsSave = true;
-        }
       }
 
-      // 2. AUTO-MIGRATION: Pastikan semua produk memiliki variasi, jika tidak ada, lengkapi otomatis!
       PRODUCTS.forEach(p => {
         if (!p.options || !Array.isArray(p.options) || p.options.length === 0) {
           const defaultMatch = DEFAULT_PRODUCTS.find(dp => dp.id === p.id);
           if (defaultMatch && defaultMatch.options) {
             p.options = JSON.parse(JSON.stringify(defaultMatch.options));
-          } else if (p.category === "sushi" || p.name.toLowerCase().includes("roll") || p.name.toLowerCase().includes("salmon")) {
+          } else if (p.category === "sushi" || p.name.toLowerCase().includes("roll")) {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.sushi));
-          } else if (p.category === "minuman" || p.name.toLowerCase().includes("tea") || p.name.toLowerCase().includes("latte")) {
+          } else if (p.category === "minuman") {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.minuman));
-          } else if (p.category === "donburi" || p.name.toLowerCase().includes("don") || p.name.toLowerCase().includes("bowl")) {
+          } else {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.donburi));
           }
           needsSave = true;
         }
       });
 
-      // 3. AUTO-MIGRATION: Pastikan ada menu yang ditandai untuk hero slideshow
       const anyFeatured = PRODUCTS.some(p => p.featuredInHero === true);
       if (!anyFeatured) {
         PRODUCTS.forEach((p, idx) => {
@@ -4945,9 +4687,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       } catch (e) {}
     }
 
-    /**
-     * HOOKS SINKRONISASI REAL-TIME DARI CLOUD FIRESTORE
-     */
     window.onFirestoreConfigUpdate = function(newConfig) {
       if (!newConfig) return;
       CONFIG = { ...CONFIG, ...newConfig };
@@ -5014,14 +4753,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       }
     }
 
-    /**
-     * UNDUH FILE HTML TERBARU (MANDIRI & STANDALONE)
-     */
     function downloadSelfFile() {
-      downloadUpdatedHTMLWithAdminData();
-    }
-
-    function downloadUpdatedHTMLWithAdminData() {
       let html = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
       const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -5032,7 +4764,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast("File HTML dengan data toko & menu terbaru berhasil diunduh!");
+      showToast("File HTML dengan data terbaru berhasil diunduh!");
     }
 
     function showToast(message, duration = 2500) {
@@ -5070,6 +4802,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       if (menu) menu.classList.add("hidden");
     }
   </script>
-
 </body>
 </html>
+
+```
