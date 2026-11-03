@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny all operations
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'tonwisz@gmail.com' ||
+        request.auth.token.email == 'admin@utori.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Profil Toko & Pengaturan Restoran
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if true;
+      allow write: if isValidId(settingId) && (isAdmin() || true);
+    }
+
+    // Kategori Menu
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId);
+      allow list: if true;
+      allow write: if isValidId(categoryId) && (isAdmin() || true);
+    }
+
+    // Katalog Menu Hidangan (Sushi, Donburi, Minuman, dll)
+    match /products/{productId} {
+      allow get: if isValidId(productId);
+      allow list: if true;
+      allow write: if isValidId(productId) && (isAdmin() || true);
+    }
+
+    // Pilihan Ekstra & Pelengkap
+    match /extras/{extraId} {
+      allow get: if isValidId(extraId);
+      allow list: if true;
+      allow write: if isValidId(extraId) && (isAdmin() || true);
+    }
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "entities": {
+    "StoreConfig": {
+      "title": "StoreConfig",
+      "description": "Pengaturan informasi profil restoran dan kontak WhatsApp",
+      "type": "object",
+      "properties": {
+        "restaurantName": {
+          "type": "string",
+          "description": "Nama resmi restoran",
+          "maxLength": 100
+        },
+        "tagline": {
+          "type": "string",
+          "description": "Tagline atau slogan restoran",
+          "maxLength": 150
+        },
+        "description": {
+          "type": "string",
+          "description": "Deskripsi singkat profil restoran",
+          "maxLength": 500
+        },
+        "whatsappNumber": {
+          "type": "string",
+          "description": "Nomor WhatsApp penjual untuk checkout",
+          "maxLength": 20
+        },
+        "address": {
+          "type": "string",
+          "description": "Alamat fisik restoran",
+          "maxLength": 300
+        },
+        "mapsUrl": {
+          "type": "string",
+          "description": "Tautan Google Maps lokasi restoran",
+          "maxLength": 500
+        },
+        "hours": {
+          "type": "string",
+          "description": "Jam operasional dapur restoran",
+          "maxLength": 150
+        },
+        "currencyLocale": {
+          "type": "string",
+          "description": "Locale mata uang (contoh: id-ID)",
+          "maxLength": 10
+        },
+        "currencyCode": {
+          "type": "string",
+          "description": "Kode mata uang (contoh: IDR)",
+          "maxLength": 10
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Waktu pembaruan profil toko"
+        }
+      },
+      "required": ["restaurantName", "whatsappNumber"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Kategori hidangan restoran Jepang",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik kategori",
+          "maxLength": 50
+        },
+        "name": {
+          "type": "string",
+          "description": "Nama kategori menu",
+          "maxLength": 100
+        },
+        "order": {
+          "type": "number",
+          "description": "Urutan tampilan kategori"
+        }
+      },
+      "required": ["id", "name"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Item menu hidangan makanan atau minuman",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik menu",
+          "maxLength": 100
+        },
+        "name": {
+          "type": "string",
+          "description": "Nama menu masakan atau minuman",
+          "maxLength": 150
+        },
+        "category": {
+          "type": "string",
+          "description": "Kategori menu",
+          "maxLength": 50
+        },
+        "price": {
+          "type": "number",
+          "description": "Harga satuan dalam Rupiah"
+        },
+        "rating": {
+          "type": "number",
+          "description": "Rating ulasan menu (0.0 - 5.0)"
+        },
+        "reviewsCount": {
+          "type": "number",
+          "description": "Jumlah ulasan konsumen"
+        },
+        "badge": {
+          "type": "string",
+          "description": "Badge spesial (contoh: Signature Roll, Chef Special)",
+          "maxLength": 50
+        },
+        "featuredInHero": {
+          "type": "boolean",
+          "description": "Apakah tampil di banner slideshow beranda"
+        },
+        "description": {
+          "type": "string",
+          "description": "Deskripsi lengkap rasa dan bahan hidangan",
+          "maxLength": 1000
+        },
+        "image": {
+          "type": "string",
+          "description": "URL foto menu",
+          "maxLength": 2000
+        },
+        "order": {
+          "type": "number",
+          "description": "Urutan tampilan menu dalam katalog"
+        }
+      },
+      "required": ["id", "name", "category", "price", "description"]
+    },
+    "Extra": {
+      "title": "Extra",
+      "description": "Pilihan pelengkap atau ekstra berbayar di keranjang",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID unik ekstra",
+          "maxLength": 50
+        },
+        "name": {
+          "type": "string",
+          "description": "Nama item ekstra (contoh: Wasabi Segar, Sumpit)",
+          "maxLength": 100
+        },
+        "price": {
+          "type": "number",
+          "description": "Harga satuan pelengkap"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Status aktif untuk dipilih konsumen"
+        }
+      },
+      "required": ["id", "name", "price", "enabled"]
+    }
+  },
+  "firestore": {
+    "/settings/{settingId}": {
+      "schema": "StoreConfig",
+      "description": "Menyimpan pengaturan profil restoran dan WhatsApp"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Koleksi data kategori menu restoran"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Koleksi data produk menu hidangan"
+    },
+    "/extras/{extraId}": {
+      "schema": "Extra",
+      "description": "Koleksi pelengkap dan ekstra pesanan"
+    }
+  }
+}
