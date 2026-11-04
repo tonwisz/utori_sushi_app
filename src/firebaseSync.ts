@@ -125,6 +125,16 @@ export async function syncProductsToFirestore(products: any[]) {
   }
 }
 
+export async function syncSingleProductToFirestore(product: any) {
+  const path = `products/${product.id}`;
+  try {
+    await setDoc(doc(db, 'products', product.id), product, { merge: true });
+    console.log(`Product ${product.id} synced directly to Firestore`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
 export async function syncExtrasToFirestore(extras: any[]) {
   const path = 'extras';
   try {
@@ -241,6 +251,7 @@ export function initFirestoreDataSync() {
   syncConfigToFirestore,
   syncCategoriesToFirestore,
   syncProductsToFirestore,
+  syncSingleProductToFirestore,
   syncExtrasToFirestore,
   initFirestoreDataSync
 };
