@@ -23,6 +23,7 @@
       getFirestore, 
       doc, 
       setDoc, 
+      deleteDoc,
       collection, 
       onSnapshot, 
       getDocFromServer 
@@ -53,12 +54,16 @@
       },
       async syncCategoriesToFirestore(cats) {
         try {
-          for (const c of cats) { await setDoc(doc(db, 'categories', c.id), c); }
+          for (let i = 0; i < cats.length; i++) {
+            await setDoc(doc(db, 'categories', cats[i].id), { ...cats[i], sortIndex: i });
+          }
         } catch(e) { console.error("Error syncCategoriesToFirestore:", e); }
       },
       async syncProductsToFirestore(prods) {
         try {
-          for (const p of prods) { await setDoc(doc(db, 'products', p.id), p); }
+          for (let i = 0; i < prods.length; i++) {
+            await setDoc(doc(db, 'products', prods[i].id), { ...prods[i], sortIndex: i });
+          }
         } catch(e) { console.error("Error syncProductsToFirestore:", e); }
       },
       async syncSingleProductToFirestore(p) {
@@ -66,10 +71,27 @@
           await setDoc(doc(db, 'products', p.id), p, { merge: true });
         } catch(e) { console.error("Error syncSingleProductToFirestore:", e); }
       },
+      async deleteProductFromFirestore(id) {
+        try {
+          await deleteDoc(doc(db, 'products', id));
+        } catch(e) { console.error("Error deleteProductFromFirestore:", e); }
+      },
+      async deleteCategoryFromFirestore(id) {
+        try {
+          await deleteDoc(doc(db, 'categories', id));
+        } catch(e) { console.error("Error deleteCategoryFromFirestore:", e); }
+      },
       async syncExtrasToFirestore(exts) {
         try {
-          for (const e of exts) { await setDoc(doc(db, 'extras', e.id), e); }
+          for (let i = 0; i < exts.length; i++) {
+            await setDoc(doc(db, 'extras', exts[i].id), { ...exts[i], sortIndex: i });
+          }
         } catch(e) { console.error("Error syncExtrasToFirestore:", e); }
+      },
+      async deleteExtraFromFirestore(id) {
+        try {
+          await deleteDoc(doc(db, 'extras', id));
+        } catch(e) { console.error("Error deleteExtraFromFirestore:", e); }
       }
     };
 
@@ -121,8 +143,9 @@
         if (!snap.empty) {
           const list = [];
           snap.forEach(d => list.push(d.data()));
+          list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreCategoriesUpdate) window.onFirestoreCategoriesUpdate(list);
-        } else if (window.CATEGORIES) {
+        } else if (window.CATEGORIES && window.CATEGORIES.length > 0) {
           window.FirestoreSync.syncCategoriesToFirestore(window.CATEGORIES);
         }
       }, (e) => console.error("Categories onSnapshot error:", e));
@@ -132,8 +155,9 @@
         if (!snap.empty) {
           const list = [];
           snap.forEach(d => list.push(d.data()));
+          list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreProductsUpdate) window.onFirestoreProductsUpdate(list);
-        } else if (window.PRODUCTS) {
+        } else if (window.PRODUCTS && window.PRODUCTS.length > 0) {
           window.FirestoreSync.syncProductsToFirestore(window.PRODUCTS);
         }
       }, (e) => console.error("Products onSnapshot error:", e));
@@ -143,8 +167,9 @@
         if (!snap.empty) {
           const list = [];
           snap.forEach(d => list.push(d.data()));
+          list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreExtrasUpdate) window.onFirestoreExtrasUpdate(list);
-        } else if (window.EXTRAS) {
+        } else if (window.EXTRAS && window.EXTRAS.length > 0) {
           window.FirestoreSync.syncExtrasToFirestore(window.EXTRAS);
         }
       }, (e) => console.error("Extras onSnapshot error:", e));
@@ -203,50 +228,7 @@
 </head>
 <body class="bg-jp-paper text-stone-800 font-sans antialiased selection:bg-jp-crimson selection:text-white">
 
-  <!-- ==================== TOP ANNOUNCEMENT BAR & ADMIN ACCESS ==================== -->
-  <aside aria-label="Pengumuman Restoran" class="bg-jp-sumi text-stone-300 text-xs px-3 sm:px-4 py-2 border-b border-stone-800">
-    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
-      
-      <!-- Store Status & Badge -->
-      <div class="flex items-center gap-2">
-        <span class="inline-flex items-center justify-center w-2 h-2 rounded-full bg-jp-crimson animate-pulse"></span>
-        <span class="font-medium text-white tracking-wide" id="topBarStoreName">ÁæΩÈ≥• ÈÆ®„Éª‰∏ºÁâ© Utori Japanese Dining</span>
-        <span class="text-stone-600 hidden sm:inline">|</span>
-        <span class="text-stone-400 hidden sm:inline" id="topBarTagline">100% Sashimi Grade Salmon ¬∑ Halal Kitchen</span>
-      </div>
 
-      <!-- Action Buttons: Admin Settings & Export -->
-      <div class="flex items-center gap-2">
-        <!-- Badge Status Firebase Firestore -->
-        <div id="firestoreStatusBadge" class="hidden sm:inline-flex">
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Firestore Aktif</span>
-          </span>
-        </div>
-
-        <!-- TOMBOL PENGATURAN ADMIN TOKO -->
-        <button 
-          onclick="handleAdminButtonClick()" 
-          class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded text-[11px] transition cursor-pointer shadow-xs"
-          title="Login Admin untuk mengelola nama toko, kategori, variasi menu, foto, dan harga"
-        >
-          <i data-lucide="lock" class="w-3.5 h-3.5"></i>
-          <span id="topAdminBtnText">Login Admin Toko</span>
-        </button>
-
-        <button 
-          onclick="downloadSelfFile()" 
-          class="inline-flex items-center gap-1 px-2 py-1 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded text-[11px] font-medium transition cursor-pointer" 
-          title="Unduh file HTML tunggal ini"
-        >
-          <i data-lucide="download" class="w-3 h-3"></i>
-          <span class="hidden sm:inline">Unduh HTML</span>
-        </button>
-      </div>
-
-    </div>
-  </aside>
 
   <!-- ==================== 1. NAVBAR / HEADER ==================== -->
   <header class="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200/80 shadow-xs">
@@ -1880,12 +1862,40 @@
         </div>
       </div>
 
+      <!-- Admin Modal Save Action Bar (Diatas Selesai & Tutup) -->
+      <div class="px-4 sm:px-6 py-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-amber-50 border-t-2 border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-2.5 text-stone-800">
+          <span class="flex h-3 w-3 relative shrink-0">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+          </span>
+          <div>
+            <p class="font-bold text-emerald-950 text-xs">Simpan Permanen ke Cloud Firestore</p>
+            <p class="text-[11px] text-stone-600">Klik tombol di samping agar seluruh perubahan menu, foto, harga, dan profil tersimpan di cloud & tidak hilang saat refresh.</p>
+          </div>
+        </div>
+
+        <button 
+          type="button"
+          id="btnSaveAllToFirestore"
+          onclick="saveAllToCloudFirestore()" 
+          class="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-900/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
+          title="Simpan seluruh data ke Cloud Firestore"
+        >
+          <i data-lucide="cloud-upload" class="w-4 h-4"></i>
+          <span id="btnSaveAllText">üíæ Simpan ke Cloud Firestore</span>
+        </button>
+      </div>
+
       <!-- Admin Modal Footer -->
-      <div class="px-5 py-3 bg-stone-100 border-t border-stone-200 flex items-center justify-between text-xs text-stone-500 shrink-0">
-        <span>Perubahan tersimpan otomatis di browser ini</span>
+      <div class="px-5 py-2.5 bg-stone-100 border-t border-stone-200 flex items-center justify-between text-xs text-stone-500 shrink-0">
+        <div class="flex items-center gap-1.5 text-[11px] text-stone-600">
+          <i data-lucide="database" class="w-3.5 h-3.5 text-emerald-600"></i>
+          <span id="adminFirestoreFooterInfo">Database: ai-studio-utorisushidonbur... (Siap Simpan)</span>
+        </div>
         <button 
           onclick="closeAdminModal()" 
-          class="px-4 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-lg font-semibold text-xs transition cursor-pointer"
+          class="px-5 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-lg font-semibold text-xs transition cursor-pointer"
         >
           Selesai & Tutup
         </button>
@@ -2052,7 +2062,7 @@
             <li><span>Pesan Antar Langsung via WhatsApp</span></li>
             <li>
               <button onclick="handleAdminButtonClick()" class="text-amber-400 hover:text-amber-300 underline font-semibold cursor-pointer">
-                ‚öôÔ∏è Pengaturan Admin Toko (Login)
+                <span id="footerAdminBtnText">‚öôÔ∏è Pengaturan Admin Toko (Login)</span>
               </button>
             </li>
           </ul>
@@ -2409,6 +2419,11 @@
       loadAdminExtras();
       loadAdminProducts(); 
       loadCartFromStorage();
+
+      window.CONFIG = CONFIG;
+      window.CATEGORIES = CATEGORIES;
+      window.PRODUCTS = PRODUCTS;
+      window.EXTRAS = EXTRAS;
 
       applyStoreConfigToUI();
       renderCategoryTabs();
@@ -3755,6 +3770,10 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       if (topBtnText) {
         topBtnText.textContent = adminAuth.isLoggedIn ? "Kelola Toko (Admin Aktif)" : "Login Admin Toko";
       }
+      const footerBtnText = document.getElementById("footerAdminBtnText");
+      if (footerBtnText) {
+        footerBtnText.textContent = adminAuth.isLoggedIn ? "‚öôÔ∏è Kelola Toko & Menu (Admin Aktif)" : "‚öôÔ∏è Pengaturan Admin Toko (Login)";
+      }
       const emailDisplay = document.getElementById("adminLoggedInEmailDisplay");
       if (emailDisplay) {
         emailDisplay.textContent = adminAuth.email;
@@ -3826,6 +3845,30 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
     }
 
     function closeAdminModal() {
+      // Sinkronisasi otomatis input form profil toko & data aktif saat modal ditutup
+      try {
+        const inputStoreName = document.getElementById("adminInputStoreName");
+        const inputTagline = document.getElementById("adminInputTagline");
+        const inputPhone = document.getElementById("adminInputPhone");
+        const inputDesc = document.getElementById("adminInputDesc");
+        const inputAddress = document.getElementById("adminInputAddress");
+        const inputHours = document.getElementById("adminInputHours");
+        const inputMaps = document.getElementById("adminInputMapsUrl");
+
+        if (inputStoreName && inputStoreName.value.trim()) CONFIG.restaurantName = inputStoreName.value.trim();
+        if (inputTagline && inputTagline.value.trim()) CONFIG.tagline = inputTagline.value.trim();
+        if (inputPhone && inputPhone.value.trim()) CONFIG.whatsappNumber = inputPhone.value.trim().replace(/[^0-9]/g, "");
+        if (inputDesc && inputDesc.value.trim()) CONFIG.description = inputDesc.value.trim();
+        if (inputAddress && inputAddress.value.trim()) CONFIG.address = inputAddress.value.trim();
+        if (inputHours && inputHours.value.trim()) CONFIG.hours = inputHours.value.trim();
+        if (inputMaps && inputMaps.value.trim()) CONFIG.mapsUrl = inputMaps.value.trim();
+
+        saveAdminConfig();
+        saveAdminCategories();
+        saveAdminProducts();
+        saveAdminExtras();
+      } catch (e) {}
+
       const backdrop = document.getElementById("adminModalBackdrop");
       const panel = document.getElementById("adminModalPanel");
       if (!backdrop || !panel) return;
@@ -3955,6 +3998,9 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
         saveAdminCategories();
         saveAdminProducts();
+        if (window.FirestoreSync && window.FirestoreSync.deleteCategoryFromFirestore) {
+          window.FirestoreSync.deleteCategoryFromFirestore(id);
+        }
         renderCategoryTabs();
         renderAdminCategoryList();
         renderProducts();
@@ -4291,6 +4337,9 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       EXTRAS = EXTRAS.filter(e => e.id !== id);
       delete selectedCartExtras[id];
       saveAdminExtras();
+      if (window.FirestoreSync && window.FirestoreSync.deleteExtraFromFirestore) {
+        window.FirestoreSync.deleteExtraFromFirestore(id);
+      }
       renderAdminExtrasList();
       renderCartExtrasUI();
       updateCartUI();
@@ -4525,6 +4574,9 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
       pendingDeleteMenuId = null;
       
       saveAdminProducts();
+      if (window.FirestoreSync && window.FirestoreSync.deleteProductFromFirestore) {
+        window.FirestoreSync.deleteProductFromFirestore(id);
+      }
       saveCartToStorage();
       renderAdminMenuList();
       renderProducts();
@@ -4969,6 +5021,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
     function saveAdminConfig() {
       try {
+        window.CONFIG = CONFIG;
         localStorage.setItem("shinzan_admin_config", JSON.stringify(CONFIG));
         if (window.FirestoreSync && window.FirestoreSync.syncConfigToFirestore) {
           window.FirestoreSync.syncConfigToFirestore(CONFIG);
@@ -4996,6 +5049,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
     function saveAdminCategories() {
       try {
+        window.CATEGORIES = CATEGORIES;
         localStorage.setItem("shinzan_admin_categories", JSON.stringify(CATEGORIES));
         if (window.FirestoreSync && window.FirestoreSync.syncCategoriesToFirestore) {
           window.FirestoreSync.syncCategoriesToFirestore(CATEGORIES);
@@ -5015,6 +5069,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
     function saveAdminProducts() {
       try {
+        window.PRODUCTS = PRODUCTS;
         localStorage.setItem("shinzan_admin_products", JSON.stringify(PRODUCTS));
         if (window.FirestoreSync && window.FirestoreSync.syncProductsToFirestore) {
           window.FirestoreSync.syncProductsToFirestore(PRODUCTS);
@@ -5078,6 +5133,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
 
     function saveAdminExtras() {
       try {
+        window.EXTRAS = EXTRAS;
         localStorage.setItem("utori_admin_extras", JSON.stringify(EXTRAS));
         if (window.FirestoreSync && window.FirestoreSync.syncExtrasToFirestore) {
           window.FirestoreSync.syncExtrasToFirestore(EXTRAS);
@@ -5100,6 +5156,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
     window.onFirestoreConfigUpdate = function(newConfig) {
       if (!newConfig) return;
       CONFIG = { ...CONFIG, ...newConfig };
+      window.CONFIG = CONFIG;
       try { localStorage.setItem("shinzan_admin_config", JSON.stringify(CONFIG)); } catch (e) {}
       applyStoreConfigToUI();
     };
@@ -5107,6 +5164,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
     window.onFirestoreCategoriesUpdate = function(newCategories) {
       if (!Array.isArray(newCategories) || newCategories.length === 0) return;
       CATEGORIES = newCategories;
+      window.CATEGORIES = CATEGORIES;
       try { localStorage.setItem("shinzan_admin_categories", JSON.stringify(CATEGORIES)); } catch (e) {}
       renderCategoryTabs();
       renderAdminCategoryList();
@@ -5116,6 +5174,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
     window.onFirestoreProductsUpdate = function(newProducts) {
       if (!Array.isArray(newProducts) || newProducts.length === 0) return;
       PRODUCTS = newProducts;
+      window.PRODUCTS = PRODUCTS;
       try { localStorage.setItem("shinzan_admin_products", JSON.stringify(PRODUCTS)); } catch (e) {}
       renderProducts();
       renderAdminMenuList();
@@ -5127,11 +5186,112 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ü
     window.onFirestoreExtrasUpdate = function(newExtras) {
       if (!Array.isArray(newExtras) || newExtras.length === 0) return;
       EXTRAS = newExtras;
+      window.EXTRAS = EXTRAS;
       try { localStorage.setItem("utori_admin_extras", JSON.stringify(EXTRAS)); } catch (e) {}
       renderAdminExtrasList();
       renderCartExtrasUI();
       updateCartUI();
     };
+
+    /**
+     * SINKRONISASI LENGKAP KE CLOUD FIRESTORE
+     * Dipanggil oleh tombol "üíæ Simpan ke Cloud Firestore" di panel admin.
+     * Membaca seluruh input aktif, menyimpannya ke LocalStorage dan menulis secara
+     * asynchronous ke Cloud Firestore dokumen & koleksi sehingga seluruh data, menu,
+     * foto, kategori, dan profil toko tidak hilang saat browser di-refresh.
+     */
+    async function saveAllToCloudFirestore() {
+      const btn = document.getElementById("btnSaveAllToFirestore");
+      const btnText = document.getElementById("btnSaveAllText");
+      const originalText = btnText ? btnText.textContent : "üíæ Simpan ke Cloud Firestore";
+
+      try {
+        if (btn) {
+          btn.disabled = true;
+          btn.classList.add("opacity-75", "cursor-wait");
+        }
+        if (btnText) {
+          btnText.textContent = "‚è≥ Menyimpan ke Cloud Firestore...";
+        }
+
+        // 1. Ambil input dari form profil toko Tab 3 jika sedang diisi
+        const inputStoreName = document.getElementById("adminInputStoreName");
+        const inputTagline = document.getElementById("adminInputTagline");
+        const inputPhone = document.getElementById("adminInputPhone");
+        const inputDesc = document.getElementById("adminInputDesc");
+        const inputAddress = document.getElementById("adminInputAddress");
+        const inputHours = document.getElementById("adminInputHours");
+        const inputMaps = document.getElementById("adminInputMapsUrl");
+
+        if (inputStoreName && inputStoreName.value.trim()) CONFIG.restaurantName = inputStoreName.value.trim();
+        if (inputTagline && inputTagline.value.trim()) CONFIG.tagline = inputTagline.value.trim();
+        if (inputPhone && inputPhone.value.trim()) CONFIG.whatsappNumber = inputPhone.value.trim().replace(/[^0-9]/g, "");
+        if (inputDesc && inputDesc.value.trim()) CONFIG.description = inputDesc.value.trim();
+        if (inputAddress && inputAddress.value.trim()) CONFIG.address = inputAddress.value.trim();
+        if (inputHours && inputHours.value.trim()) CONFIG.hours = inputHours.value.trim();
+        if (inputMaps && inputMaps.value.trim()) CONFIG.mapsUrl = inputMaps.value.trim();
+
+        // 2. Simpan ke local storage
+        localStorage.setItem("shinzan_admin_config", JSON.stringify(CONFIG));
+        localStorage.setItem("shinzan_admin_categories", JSON.stringify(CATEGORIES));
+        localStorage.setItem("shinzan_admin_products", JSON.stringify(PRODUCTS));
+        localStorage.setItem("utori_admin_extras", JSON.stringify(EXTRAS));
+
+        window.CONFIG = CONFIG;
+        window.CATEGORIES = CATEGORIES;
+        window.PRODUCTS = PRODUCTS;
+        window.EXTRAS = EXTRAS;
+
+        // 3. Simpan ke Cloud Firestore secara asynchronous dan tunggu sampai selesai
+        if (window.FirestoreSync) {
+          if (window.FirestoreSync.syncConfigToFirestore) {
+            await window.FirestoreSync.syncConfigToFirestore(CONFIG);
+          }
+          if (window.FirestoreSync.syncCategoriesToFirestore) {
+            await window.FirestoreSync.syncCategoriesToFirestore(CATEGORIES);
+          }
+          if (window.FirestoreSync.syncProductsToFirestore) {
+            await window.FirestoreSync.syncProductsToFirestore(PRODUCTS);
+          }
+          if (window.FirestoreSync.syncExtrasToFirestore) {
+            await window.FirestoreSync.syncExtrasToFirestore(EXTRAS);
+          }
+        }
+
+        // 4. Update seluruh tampilan
+        applyStoreConfigToUI();
+        renderCategoryTabs();
+        renderProducts();
+        renderHeroSlideshow();
+        renderAdminMenuList();
+        renderAdminCategoryList();
+        renderAdminExtrasList();
+        renderAdminSlideshowSettings();
+        updateCartUI();
+
+        if (btnText) {
+          btnText.textContent = "‚úÖ Berhasil Disimpan ke Cloud!";
+        }
+        showToast("‚úÖ Berhasil! Seluruh data & foto tersimpan ke Cloud Firestore dan tidak hilang saat di-refresh.", 4000);
+
+        setTimeout(() => {
+          if (btnText) btnText.textContent = originalText;
+          if (btn) {
+            btn.disabled = false;
+            btn.classList.remove("opacity-75", "cursor-wait");
+          }
+        }, 2500);
+
+      } catch (err) {
+        console.error("Gagal simpan ke Cloud Firestore:", err);
+        if (btnText) btnText.textContent = "‚ùå Gagal Simpan";
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove("opacity-75", "cursor-wait");
+        }
+        alert("Gagal menyimpan ke Cloud Firestore: " + (err.message || err));
+      }
+    }
 
     function saveCartToStorage() {
       try {
