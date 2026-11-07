@@ -49,5 +49,13 @@ service cloud.firestore {
       allow list: if true;
       allow write: if isValidId(extraId) && (isAdmin() || true);
     }
+
+    // Katalog Menu Paket Hemat & Platter
+    match /packages/{packageId} {
+      allow get: if isValidId(packageId);
+      allow list: if true;
+      allow write: if isValidId(packageId) && (isAdmin() || true);
+    }
   }
 }
+

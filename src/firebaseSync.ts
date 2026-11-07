@@ -3,6 +3,7 @@ import {
   getFirestore,
   doc,
   setDoc,
+  deleteDoc,
   getDoc,
   getDocs,
   collection,
@@ -13,7 +14,8 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase App
 export const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId;
+export const db = firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
 
 export enum OperationType {
   CREATE = 'create',
@@ -147,6 +149,28 @@ export async function syncExtrasToFirestore(extras: any[]) {
   }
 }
 
+export async function syncPackagesToFirestore(packages: any[]) {
+  const path = 'packages';
+  try {
+    for (const pkg of packages) {
+      await setDoc(doc(db, 'packages', pkg.id), pkg);
+    }
+    console.log("Packages saved to Firestore");
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deletePackageFromFirestore(pkgId: string) {
+  const path = `packages/${pkgId}`;
+  try {
+    await deleteDoc(doc(db, 'packages', pkgId));
+    console.log(`Package ${pkgId} deleted from Firestore`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
 /**
  * INITIAL LOAD & REAL-TIME LISTENER
  */
@@ -240,6 +264,28 @@ export function initFirestoreDataSync() {
   } catch (err) {
     console.error("Extras onSnapshot failed", err);
   }
+
+  // 5. Listen Packages (Menu Paket)
+  const packagePath = 'packages';
+  try {
+    onSnapshot(collection(db, 'packages'), (snapshot) => {
+      if (!snapshot.empty) {
+        const pkgList: any[] = [];
+        snapshot.forEach(d => pkgList.push(d.data()));
+        if ((window as any).onFirestorePackagesUpdate) {
+          (window as any).onFirestorePackagesUpdate(pkgList);
+        }
+      } else {
+        if ((window as any).PACKAGE_MENUS) {
+          syncPackagesToFirestore((window as any).PACKAGE_MENUS);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, packagePath);
+    });
+  } catch (err) {
+    console.error("Packages onSnapshot failed", err);
+  }
 }
 
 // Expose to window for vanilla JS application
@@ -247,12 +293,14 @@ export function initFirestoreDataSync() {
   db,
   app,
   projectId: firebaseConfig.projectId,
-  databaseId: firebaseConfig.firestoreDatabaseId,
+  databaseId: (firebaseConfig as any).firestoreDatabaseId || '(default)',
   syncConfigToFirestore,
   syncCategoriesToFirestore,
   syncProductsToFirestore,
   syncSingleProductToFirestore,
   syncExtrasToFirestore,
+  syncPackagesToFirestore,
+  deletePackageFromFirestore,
   initFirestoreDataSync
 };
 
@@ -262,3 +310,4 @@ if (document.readyState === 'loading') {
 } else {
   initFirestoreDataSync();
 }
+

@@ -40,13 +40,15 @@
     };
 
     const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    const db = firebaseConfig.firestoreDatabaseId 
+      ? getFirestore(app, firebaseConfig.firestoreDatabaseId) 
+      : getFirestore(app);
 
     window.FirestoreSync = {
       db,
       app,
       projectId: firebaseConfig.projectId,
-      databaseId: firebaseConfig.firestoreDatabaseId,
+      databaseId: firebaseConfig.firestoreDatabaseId || "(default)",
       async syncConfigToFirestore(cfg) {
         try {
           await setDoc(doc(db, 'settings', 'store_config'), { ...cfg, updatedAt: new Date().toISOString() });
@@ -124,6 +126,10 @@
       if (detailBadge) {
         detailBadge.textContent = connected ? `Project: ${firebaseConfig.projectId} (Aktif & Sinkron)` : "Menghubungkan...";
       }
+      const footerBadge = document.getElementById("adminFirestoreFooterInfo");
+      if (footerBadge) {
+        footerBadge.textContent = connected ? `Database: ${firebaseConfig.projectId} (Aktif & Siap Simpan)` : `Database: ${firebaseConfig.projectId} (Menghubungkan...)`;
+      }
     }
 
     function initListeners() {
@@ -173,7 +179,22 @@
           window.FirestoreSync.syncExtrasToFirestore(window.EXTRAS);
         }
       }, (e) => console.error("Extras onSnapshot error:", e));
+
+      // Listen Packages (Menu Paket)
+      onSnapshot(collection(db, 'packages'), (snap) => {
+        if (!snap.empty) {
+          const list = [];
+          snap.forEach(d => list.push(d.data()));
+          list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
+          if (window.onFirestorePackagesUpdate) window.onFirestorePackagesUpdate(list);
+        } else if (window.PACKAGE_MENUS && window.PACKAGE_MENUS.length > 0) {
+          if (window.FirestoreSync && window.FirestoreSync.syncPackagesToFirestore) {
+            window.FirestoreSync.syncPackagesToFirestore(window.PACKAGE_MENUS);
+          }
+        }
+      }, (e) => console.error("Packages onSnapshot error:", e));
     }
+
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initListeners);
@@ -223,6 +244,18 @@
     .no-scrollbar {
       -ms-overflow-style: none;
       scrollbar-width: none;
+    }
+
+    /* Premium Smooth Slide-In & Atmospheric Multi-Layered Drop Shadow for Cart Drawer */
+    #cartModalBackdrop {
+      transition: opacity 380ms cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 380ms cubic-bezier(0.16, 1, 0.3, 1);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    #cartDrawerPanel {
+      transition: transform 450ms cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: -22px 0 65px -12px rgba(0, 0, 0, 0.45), -8px 0 24px -6px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+      will-change: transform;
     }
   </style>
 </head>
@@ -406,13 +439,15 @@
                 <span>Pesan Menu Sekarang</span>
               </a>
 
-              <a 
-                href="#omakase-highlight" 
-                class="inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-stone-800/80 hover:bg-stone-700 text-stone-200 font-semibold text-xs sm:text-sm rounded-xl border border-stone-700 transition"
+              <button 
+                type="button"
+                onclick="openPackageMenuPage()" 
+                class="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-white hover:bg-stone-50 active:bg-stone-100 text-jp-crimson font-bold text-xs sm:text-sm rounded-xl shadow-lg shadow-black/25 hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 cursor-pointer border border-white"
+                title="Buka Katalog Menu Paket Hemat & Platter"
               >
-                <span>Lihat Signature Roll</span>
-                <i data-lucide="arrow-down" class="w-3.5 h-3.5 text-stone-400"></i>
-              </a>
+                <i data-lucide="gift" class="w-4 h-4 text-jp-crimson"></i>
+                <span class="tracking-wide">Menu Paket</span>
+              </button>
             </div>
 
             <!-- Mini Trust Strip -->
@@ -966,18 +1001,109 @@
     </div>
   </div>
 
-  <!-- ==================== 4 & 5. SISTEM KERANJANG BELANJA (DENGAN TOMBOL WA RAMPING & FOKUS PERIKSA PESANAN) ==================== -->
+  <!-- ==================== HALAMAN BARU / MODAL DEDIKASI: KATALOG MENU PAKET ==================== -->
+  <div 
+    id="packageMenuModalBackdrop" 
+    class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md opacity-0 pointer-events-none transition-opacity duration-300 flex items-center justify-center p-2.5 sm:p-5"
+    onclick="handlePackageMenuBackdropClick(event)"
+  >
+    <div 
+      id="packageMenuModalPanel" 
+      class="w-full max-w-5xl bg-stone-900 text-stone-100 rounded-2xl sm:rounded-3xl shadow-2xl border border-stone-800 overflow-hidden flex flex-col max-h-[92vh] transform scale-95 transition-all duration-300"
+    >
+      <!-- Header Katalog Menu Paket -->
+      <div class="px-5 py-4 sm:px-7 sm:py-5 bg-gradient-to-r from-stone-950 via-jp-sumi to-stone-900 border-b border-stone-800 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white text-jp-crimson flex items-center justify-center font-bold shadow-lg shadow-black/40 shrink-0">
+            <i data-lucide="gift" class="w-5 h-5 sm:w-6 sm:h-6 text-jp-crimson"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] sm:text-[11px] font-bold text-jp-crimson bg-red-950/70 border border-red-800/80 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                Paket Hemat & Platter · セットメニュー
+              </span>
+            </div>
+            <h3 class="font-display font-black text-lg sm:text-2xl text-white tracking-tight mt-0.5">
+              Katalog Menu Paket
+            </h3>
+            <p class="text-[11px] sm:text-xs text-stone-400 hidden sm:block">
+              Pilihan komplit sushi roll, donburi, bento & ocha segar dengan harga lebih hemat untuk makan berdua maupun keluarga.
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button 
+            type="button"
+            onclick="openCartModal()" 
+            class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold border border-stone-700 transition cursor-pointer"
+          >
+            <i data-lucide="shopping-cart" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Keranjang</span>
+          </button>
+          <button 
+            type="button"
+            onclick="closePackageMenuPage()" 
+            class="p-2 text-stone-400 hover:text-white rounded-xl hover:bg-stone-800 transition cursor-pointer"
+            aria-label="Tutup Katalog Paket"
+          >
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Trust Strip -->
+      <div class="bg-gradient-to-r from-red-950/40 via-stone-900 to-amber-950/30 px-5 py-2.5 border-b border-stone-800/80 flex items-center justify-between text-xs text-stone-300 shrink-0 overflow-x-auto no-scrollbar">
+        <div class="flex items-center gap-4 sm:gap-6 min-w-max text-[11px]">
+          <span class="flex items-center gap-1.5 text-stone-300">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Lebih Hemat s/d 30%</span>
+          </span>
+          <span class="flex items-center gap-1.5 text-stone-300">
+            <i data-lucide="users" class="w-3.5 h-3.5 text-rose-400"></i>
+            <span>Porsi Pas Berdua & Keluarga</span>
+          </span>
+          <span class="flex items-center gap-1.5 text-stone-300">
+            <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>Sudah Termasuk Wasabi, Shoyu & Sumpit</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Packages Cards Grid Container -->
+      <div id="packageMenuListContainer" class="flex-1 overflow-y-auto p-4 sm:p-6 sm:p-8 grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 bg-stone-950/60">
+        <!-- Rendered by JavaScript: renderPackageMenuCards() -->
+      </div>
+
+      <!-- Footer Info -->
+      <div class="px-5 py-3 bg-stone-950 border-t border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-stone-400 shrink-0">
+        <p class="text-[11px]">
+          💡 Ingin memesan paket khusus atau catering sushi? Hubungi kami langsung via WhatsApp.
+        </p>
+        <button 
+          type="button"
+          onclick="closePackageMenuPage()" 
+          class="w-full sm:w-auto px-4 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl font-bold text-xs transition cursor-pointer"
+        >
+          Kembali ke Beranda
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ==================== 4 & 5. SISTEM KERANJANG BELANJA (DENGAN SLIDE-IN HALUS & DROP SHADOW PREMIUM) ==================== -->
   <div 
     id="cartModalBackdrop" 
-    class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs opacity-0 pointer-events-none transition-opacity duration-300"
+
+    class="fixed inset-0 z-50 bg-black/60 opacity-0 pointer-events-none"
     onclick="handleBackdropClick(event)"
   >
-    <div class="fixed inset-y-0 right-0 max-w-full flex pl-4 sm:pl-10">
+    <div class="fixed inset-y-0 right-0 max-w-full flex pl-3 sm:pl-10">
       
       <!-- Drawer Panel -->
       <div 
         id="cartDrawerPanel" 
-        class="w-screen max-w-md bg-white shadow-2xl flex flex-col transform translate-x-full transition-transform duration-300 ease-in-out"
+        class="w-screen max-w-md bg-white flex flex-col transform translate-x-full border-l border-stone-800/15"
       >
         <!-- Modal Header -->
         <div class="px-4 py-3 sm:px-5 sm:py-3.5 bg-jp-sumi text-white flex items-center justify-between border-b border-stone-800 shrink-0">
@@ -1275,6 +1401,14 @@
           <span>Kelola Menu & Variasi</span>
         </button>
         <button 
+          onclick="switchAdminTab('tabPackage')" 
+          id="btnTabPackage" 
+          class="px-3.5 py-2 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+        >
+          <i data-lucide="gift" class="w-3.5 h-3.5 text-jp-crimson"></i>
+          <span>Menu Paket</span>
+        </button>
+        <button 
           onclick="switchAdminTab('tabCategory')" 
           id="btnTabCategory" 
           class="px-3.5 py-2 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
@@ -1282,6 +1416,7 @@
           <i data-lucide="tags" class="w-3.5 h-3.5"></i>
           <span>Pengaturan Kategori</span>
         </button>
+
         <button 
           onclick="switchAdminTab('tabStore')" 
           id="btnTabStore" 
@@ -1639,8 +1774,156 @@
 
       </div>
 
+      <!-- Admin Tab: KELOLA MENU PAKET (SET MENU & PLATTER) -->
+      <div id="tabPackageContent" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
+        
+        <!-- Action Row -->
+        <div class="flex flex-wrap items-center justify-between gap-3 bg-red-50/70 p-3.5 rounded-xl border border-red-200">
+          <div>
+            <h4 class="font-bold text-xs sm:text-sm text-stone-900 flex items-center gap-1.5">
+              <i data-lucide="gift" class="w-4 h-4 text-jp-crimson"></i>
+              <span>Kelola Menu Paket Hemat & Platter</span>
+            </h4>
+            <p class="text-[11px] text-stone-500">
+              Atur menu paket combo/family yang tampil di halaman katalog khusus saat konsumen mengklik tombol <strong>"Menu Paket"</strong>.
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button 
+              type="button"
+              onclick="toggleAddPackageForm()" 
+              class="px-3 py-1.5 bg-jp-crimson hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
+            >
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Tambah Paket Baru</span>
+            </button>
+            <button 
+              type="button"
+              onclick="resetToDefaultPackages()" 
+              class="px-2.5 py-1.5 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-xs font-semibold transition cursor-pointer"
+              title="Kembalikan paket ke default sushi bar"
+            >
+              Reset Paket Default
+            </button>
+          </div>
+        </div>
+
+        <!-- Form Tambah Paket Baru -->
+        <div id="addPackageForm" class="hidden bg-stone-50 p-4 rounded-xl border border-stone-300 space-y-3">
+          <h5 class="font-bold text-xs text-stone-900 flex items-center justify-between">
+            <span class="flex items-center gap-1.5">
+              <i data-lucide="plus-circle" class="w-4 h-4 text-jp-crimson"></i>
+              <span>Formulir Tambah Menu Paket Baru</span>
+            </span>
+            <button type="button" onclick="toggleAddPackageForm()" class="text-stone-400 hover:text-stone-600 text-xs">Tutup ✕</button>
+          </h5>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div>
+              <label class="block text-stone-700 font-bold mb-1">Nama Paket *</label>
+              <input type="text" id="newPackageName" placeholder="Contoh: Paket Duo Salmon Lovers" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
+            </div>
+
+            <div>
+              <label class="block text-stone-700 font-bold mb-1">Label / Badge Promo</label>
+              <input type="text" id="newPackageBadge" placeholder="Contoh: Hemat 25% / Best Seller / Porsi 2 Orang" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
+            </div>
+
+            <div>
+              <label class="block text-stone-700 font-bold mb-1">Harga Paket Promo (Rp) *</label>
+              <input type="number" id="newPackagePrice" placeholder="Contoh: 95000" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
+            </div>
+
+            <div>
+              <label class="block text-stone-700 font-bold mb-1">Harga Coret / Normal (Rp)</label>
+              <input type="number" id="newPackageOriginalPrice" placeholder="Contoh: 125000 (Kosongkan jika tidak ada)" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
+            </div>
+
+            <div>
+              <label class="block text-stone-700 font-bold mb-1">Porsi Sajian</label>
+              <input type="text" id="newPackagePortion" placeholder="Contoh: 2 Orang / 4-5 Orang / 1 Orang" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
+            </div>
+
+            <div>
+              <label class="block text-stone-700 font-bold mb-1">Rating Bintang Awal</label>
+              <input type="number" step="0.1" min="1" max="5" id="newPackageRating" value="4.9" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
+            </div>
+
+            <div class="sm:col-span-2">
+              <label class="block text-stone-700 font-bold mb-1">Deskripsi Singkat Paket</label>
+              <textarea id="newPackageDesc" rows="2" placeholder="Deskripsikan kelezatan dan keunggulan paket ini..." class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none"></textarea>
+            </div>
+
+            <div class="sm:col-span-2">
+              <label class="block text-stone-700 font-bold mb-1">Daftar Menu Didalam Paket (Pisahkan dengan tanda koma atau baris baru)</label>
+              <textarea id="newPackageItems" rows="2" placeholder="Contoh: 1x Salmon Mentai Aburi Roll (8 pcs), 1x Tori Karaage, 2x Cold Ocha" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none"></textarea>
+            </div>
+
+            <div class="sm:col-span-2">
+              <label class="block text-stone-700 font-bold mb-1">Pilihan Variasi Paket (Format: Nama Variasi: Pilihan 1, Pilihan 2 | Grup 2: Opsi A, Opsi B)</label>
+              <textarea id="newPackageVariations" rows="2" placeholder="Pilihan Minuman: 2x Cold Ocha (Refill), 2x Hot Ocha, Kyoto Matcha Latte (+Rp 5.000) | Level Pedas: Normal, Ekstra Pedas" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none"></textarea>
+              <span class="text-[10px] text-stone-500">Kosongkan jika ingin memakai variasi minuman & level pedas standar restoran.</span>
+            </div>
+
+
+            <!-- Upload Foto Paket Lokal -->
+            <div class="sm:col-span-2 bg-white p-3 rounded-xl border border-stone-200 space-y-2">
+              <label class="block text-stone-800 font-bold text-xs flex items-center gap-1.5">
+                <i data-lucide="image-plus" class="w-4 h-4 text-jp-crimson"></i>
+                <span>Foto Menu Paket (Pilih dari Komputer / HP) *</span>
+              </label>
+
+              <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <input 
+                  type="file" 
+                  id="newPackagePhotoFile" 
+                  accept="image/*" 
+                  onchange="handlePackageLocalPhotoUpload(event, 'newPackagePhotoPreview', 'newPackageImage')" 
+                  class="block w-full text-xs text-stone-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-red-50 file:text-jp-crimson hover:file:bg-red-100 cursor-pointer"
+                />
+                
+                <div class="flex items-center gap-2 shrink-0">
+                  <img 
+                    id="newPackagePhotoPreview" 
+                    src="https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80" 
+                    alt="Preview" 
+                    class="w-12 h-12 rounded-lg object-cover border border-stone-200"
+                  />
+                  <input type="hidden" id="newPackageImage" value="https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-stone-200">
+            <button 
+              type="button" 
+              onclick="toggleAddPackageForm()" 
+              class="px-3 py-1.5 text-stone-600 hover:text-stone-800 text-xs font-semibold cursor-pointer"
+            >
+              Batal
+            </button>
+            <button 
+              type="button" 
+              onclick="saveNewPackage()" 
+              class="px-4 py-1.5 bg-jp-crimson hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
+            >
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Simpan Menu Paket</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Daftar Menu Paket Yang Ada (Admin View) -->
+        <div id="adminPackageList" class="space-y-3">
+          <!-- Populated by renderAdminPackageList() -->
+        </div>
+
+      </div>
+
       <!-- Admin Tab 2: PENGATURAN KATEGORI -->
       <div id="tabCategoryContent" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs">
+
         <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h4 class="font-bold text-xs sm:text-sm text-stone-900">Kelola Kategori Menu Toko</h4>
@@ -1863,15 +2146,15 @@
       </div>
 
       <!-- Admin Modal Save Action Bar (Diatas Selesai & Tutup) -->
-      <div class="px-4 sm:px-6 py-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-amber-50 border-t-2 border-emerald-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-        <div class="flex items-center gap-2.5 text-stone-800">
-          <span class="flex h-3 w-3 relative shrink-0">
+      <div class="px-4 sm:px-5 py-2 bg-gradient-to-r from-emerald-50/90 via-teal-50/60 to-stone-50 border-t border-emerald-300/60 flex flex-col sm:flex-row items-center justify-between gap-2 shrink-0">
+        <div class="flex items-center gap-2 text-stone-700 min-w-0">
+          <span class="flex h-2 w-2 relative shrink-0">
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
           </span>
-          <div>
-            <p class="font-bold text-emerald-950 text-xs">Simpan Permanen ke Cloud Firestore</p>
-            <p class="text-[11px] text-stone-600">Klik tombol di samping agar seluruh perubahan menu, foto, harga, dan profil tersimpan di cloud & tidak hilang saat refresh.</p>
+          <div class="text-[11px] leading-tight">
+            <span class="font-bold text-emerald-950">Simpan ke Cloud Firestore:</span>
+            <span class="text-stone-500 ml-1 hidden sm:inline">Perubahan menu, foto & profil tersimpan permanen.</span>
           </div>
         </div>
 
@@ -1879,23 +2162,23 @@
           type="button"
           id="btnSaveAllToFirestore"
           onclick="saveAllToCloudFirestore()" 
-          class="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-bold text-xs shadow-md shadow-emerald-900/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 shrink-0"
+          class="w-full sm:w-auto px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg font-bold text-xs shadow-xs hover:shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
           title="Simpan seluruh data ke Cloud Firestore"
         >
-          <i data-lucide="cloud-upload" class="w-4 h-4"></i>
-          <span id="btnSaveAllText">💾 Simpan ke Cloud Firestore</span>
+          <i data-lucide="cloud-upload" class="w-3.5 h-3.5"></i>
+          <span id="btnSaveAllText">Simpan ke Cloud</span>
         </button>
       </div>
 
       <!-- Admin Modal Footer -->
-      <div class="px-5 py-2.5 bg-stone-100 border-t border-stone-200 flex items-center justify-between text-xs text-stone-500 shrink-0">
-        <div class="flex items-center gap-1.5 text-[11px] text-stone-600">
-          <i data-lucide="database" class="w-3.5 h-3.5 text-emerald-600"></i>
-          <span id="adminFirestoreFooterInfo">Database: ai-studio-utorisushidonbur... (Siap Simpan)</span>
+      <div class="px-4 sm:px-5 py-2 bg-stone-100 border-t border-stone-200 flex items-center justify-between text-xs text-stone-500 shrink-0">
+        <div class="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-stone-600">
+          <i data-lucide="database" class="w-3 h-3 text-emerald-600"></i>
+          <span id="adminFirestoreFooterInfo">Database: pos-kasir-utori (Aktif & Siap Simpan)</span>
         </div>
         <button 
           onclick="closeAdminModal()" 
-          class="px-5 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-lg font-semibold text-xs transition cursor-pointer"
+          class="px-3.5 py-1.5 bg-stone-800 hover:bg-stone-900 text-white rounded-lg font-semibold text-xs transition cursor-pointer"
         >
           Selesai & Tutup
         </button>
@@ -2373,6 +2656,130 @@
     ];
 
     /**
+     * 5b. KATALOG MENU PAKET (SET MENUS, COMBO & PLATTER)
+     */
+    const DEFAULT_PACKAGE_MENUS = [
+      {
+        id: "pkg-1",
+        name: "Paket Tokyo Roll Combo (2 Orang)",
+        badge: "Hemat 25%",
+        originalPrice: 125000,
+        price: 95000,
+        rating: 4.9,
+        reviewsCount: 312,
+        portion: "2 Orang",
+        description: "Kombinasi roll sushi favorit paling hemat untuk santap berdua dengan salmon aburi mentai & katsu roll renyah.",
+        items: [
+          "1x Salmon Mentai Aburi Roll (8 pcs)",
+          "1x Dragon Spicy Crunch Roll (8 pcs)",
+          "2x Cold Ocha Refill",
+          "Paket Wasabi & Shoyu Lengkap"
+        ],
+        options: [
+          {
+            name: "Pilihan Minuman Paket",
+            choices: ["2x Cold Ocha Dingin (Refill)", "2x Hot Ocha Hangat", "1x Cold Ocha + 1x Lemon Ocha (+Rp 3.000)", "2x Kyoto Matcha Latte (+Rp 10.000)"]
+          },
+          {
+            name: "Level Pedas Spicy Roll",
+            choices: ["Pedas Sedang (Normal)", "Tidak Pedas (Mild)", "Ekstra Spicy Mayo (+Rp 2.000)"]
+          }
+        ],
+        image: "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=800&q=80",
+        enabled: true
+      },
+      {
+        id: "pkg-2",
+        name: "Paket Duo Donburi & Sushi Lovers",
+        badge: "Best Seller",
+        originalPrice: 148000,
+        price: 115000,
+        rating: 5.0,
+        reviewsCount: 428,
+        portion: "2-3 Orang",
+        description: "Perpaduan semangkuk Yakiniku Don gurih dan kesegaran Salmon Aburi Roll dengan Tori Karaage lezat.",
+        items: [
+          "1x Yakiniku Donburi Gurih",
+          "1x Salmon Mentai Aburi Roll (8 pcs)",
+          "1x Tori Karaage Crunchy (5 pcs)",
+          "2x Iced Uji Kyoto Matcha Latte"
+        ],
+        options: [
+          {
+            name: "Pilihan Telur Donburi",
+            choices: ["Onsen Egg (Setengah Matang)", "Telur Matang Sempurna", "Telur Dadar Iris (Tamago)"]
+          },
+          {
+            name: "Pilihan Minuman",
+            choices: ["2x Iced Kyoto Matcha Latte", "1x Matcha + 1x Cold Ocha", "2x Hot Genmaicha"]
+          }
+        ],
+        image: "https://images.unsplash.com/photo-1617196034796-73dfa7b1fd56?auto=format&fit=crop&w=800&q=80",
+        enabled: true
+      },
+      {
+        id: "pkg-3",
+        name: "Family Omakase Platter (4-5 Orang)",
+        badge: "Super Hemat",
+        originalPrice: 285000,
+        price: 219000,
+        rating: 4.9,
+        reviewsCount: 189,
+        portion: "4-5 Orang",
+        description: "Platter komplit aneka roll dan nigiri premium untuk dinikmati bersama keluarga tercinta atau rekan kerja.",
+        items: [
+          "1x Salmon Mentai Aburi Roll (8 pcs)",
+          "1x Dragon Spicy Crunch Roll (8 pcs)",
+          "1x Salmon Nigiri Set (4 pcs)",
+          "1x Ebi Tempura Moriawase Set",
+          "4x Genmaicha Roasted Green Tea",
+          "Gari & Wasabi Platter Jar"
+        ],
+        options: [
+          {
+            name: "Tingkat Kematangan Salmon",
+            choices: ["Campur (Aburi Panggang & Fresh)", "Semua Matang Sempurna (Well-Done)", "Semua Fresh Raw Sashimi"]
+          },
+          {
+            name: "Pilihan Teh Minuman (4 Gelas)",
+            choices: ["4x Genmaicha Dingin", "4x Ocha Hangat", "2x Dingin + 2x Hangat"]
+          }
+        ],
+        image: "https://images.unsplash.com/photo-1553621042-f6e147245754?auto=format&fit=crop&w=800&q=80",
+        enabled: true
+      },
+      {
+        id: "pkg-4",
+        name: "Solo Bento & Donburi Set",
+        badge: "Porsi Kenyang",
+        originalPrice: 85000,
+        price: 68000,
+        rating: 4.8,
+        reviewsCount: 154,
+        portion: "1 Orang",
+        description: "Paket lengkap porsi individu: rice bowl lezat Chicken Katsu Kari ditemani tempura renyah dan matcha dingin segar.",
+        items: [
+          "1x Chicken Katsu Japanese Curry Don",
+          "1x Ebi Tempura Crispy",
+          "1x Iced Uji Kyoto Matcha Latte"
+        ],
+        options: [
+          {
+            name: "Tingkat Pedas Kari Jepang",
+            choices: ["Kari Normal Sedang", "Kari Gurih Manis (Mild)", "Kari Ekstra Pedas (+Rp 2.000)"]
+          },
+          {
+            name: "Tingkat Es Minuman Matcha",
+            choices: ["Normal Ice (Dingin Segar)", "Less Ice (Sedikit Es)", "Sajian Hangat (Hot)"]
+          }
+        ],
+        image: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80",
+        enabled: true
+      }
+    ];
+
+
+    /**
      * STATE AKTIF APLIKASI
      */
     let adminAuth = { ...DEFAULT_ADMIN_AUTH, isLoggedIn: false };
@@ -2380,6 +2787,7 @@
     let CATEGORIES = [...DEFAULT_CATEGORIES];
     let PRODUCTS = [...DEFAULT_PRODUCTS];
     let EXTRAS = [...DEFAULT_EXTRAS];
+    let PACKAGE_MENUS = [...DEFAULT_PACKAGE_MENUS];
     let cart = [];
     let activeCategory = "semua";
     let searchQuery = "";
@@ -2417,6 +2825,7 @@
       loadAdminConfig();
       loadAdminCategories();
       loadAdminExtras();
+      loadAdminPackages();
       loadAdminProducts(); 
       loadCartFromStorage();
 
@@ -2424,19 +2833,23 @@
       window.CATEGORIES = CATEGORIES;
       window.PRODUCTS = PRODUCTS;
       window.EXTRAS = EXTRAS;
+      window.PACKAGE_MENUS = PACKAGE_MENUS;
 
       applyStoreConfigToUI();
       renderCategoryTabs();
       renderProducts();
+      renderPackageMenuCards();
       renderHeroSlideshow();
       startHeroSlideshowTimer();
       renderAdminExtrasList();
+      renderAdminPackageList();
       renderAdminSlideshowSettings();
       renderCartExtrasUI();
       updateCartUI();
       updateAdminAuthButtonUI();
       updateKitchenStatusUI();
       setInterval(updateKitchenStatusUI, 60000);
+
 
       if (window.lucide) window.lucide.createIcons();
     });
@@ -2518,6 +2931,38 @@
       } catch (err) {
         const d = new Date();
         return d.getHours() * 60 + d.getMinutes();
+      }
+    }
+
+    /**
+     * Menentukan sapaan bahasa Jepang otomatis berdasarkan jam saat ini (WIB / Asia Jakarta):
+     * - 17.00 - 24.00 (s/d dini hari < 04.00): Konbanwa (こんばんは - Selamat Malam)
+     * - 11.00 - 17.00: Konnichiwa (こんにちは - Selamat Siang/Sore)
+     * - 04.00 - 11.00: Ohayou gozaimasu (おはようございます - Selamat Pagi)
+     */
+    function getJapaneseGreetingByTime() {
+      try {
+        const d = new Date();
+        const parts = new Intl.DateTimeFormat("en-US", {
+          timeZone: "Asia/Jakarta",
+          hour: "numeric",
+          hour12: false
+        }).formatToParts(d);
+
+        let currentHour = d.getHours();
+        const hourPart = parts.find(p => p.type === "hour");
+        if (hourPart) currentHour = parseInt(hourPart.value, 10);
+
+        if (currentHour >= 17 || currentHour < 4) {
+          return "Konbanwa";
+        } else if (currentHour >= 11 && currentHour < 17) {
+          return "Konnichiwa";
+        } else {
+          return "Ohayou gozaimasu";
+        }
+      } catch (err) {
+        const h = new Date().getHours();
+        return (h >= 17 || h < 4) ? "Konbanwa" : "Konnichiwa";
       }
     }
 
@@ -3135,9 +3580,16 @@
       let unitPrice = product.price;
       if (selectedOptions) {
         Object.values(selectedOptions).forEach(val => {
-          if (val.includes("+Rp 5.000")) unitPrice += 5000;
+          if (typeof val === 'string') {
+            const match = val.match(/\+Rp\s*([\d.]+)/i);
+            if (match) {
+              const extra = Number(match[1].replace(/\./g, '')) || 0;
+              unitPrice += extra;
+            }
+          }
         });
       }
+
 
       const optionKey = Object.entries(selectedOptions || {}).sort().map(([k, v]) => `${k}:${v}`).join("|");
       const cartItemId = `${product.id}_${optionKey}_${notes}`;
@@ -3408,6 +3860,10 @@
         }
       }
 
+      if (typeof updatePackageCardsCartCount === "function") {
+        updatePackageCardsCartCount();
+      }
+
       if (window.lucide) window.lucide.createIcons();
     }
 
@@ -3419,7 +3875,12 @@
       resetClearCartBtn();
       backdrop.classList.remove("pointer-events-none", "opacity-0");
       backdrop.classList.add("opacity-100");
-      drawer.classList.remove("translate-x-full");
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          drawer.classList.remove("translate-x-full");
+        });
+      });
       document.body.classList.add("overflow-hidden");
     }
 
@@ -3442,6 +3903,7 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
+        closePackageMenuPage();
         closeCartModal();
         closeAdminModal();
         closeAdminLoginModal();
@@ -3449,6 +3911,7 @@
         closeAdminVariationEditor();
       }
     });
+
 
     function handleOrderTypeChange(type) {
       const label = document.getElementById("tableOrAddressLabel");
@@ -3666,8 +4129,10 @@ ${extrasTotal > 0 ? `*Total Biaya Ekstra:* ${currencyFormatter.format(extrasTota
         timeStyle: "short"
       });
 
+      const greeting = getJapaneseGreetingByTime();
+
       const messageText = 
-`Konnichiwa *${CONFIG.restaurantName}*! 🍱🍣
+`${greeting} *${CONFIG.restaurantName}*! 🍱🍣
 Saya ingin memesan menu Sushi & Donburi:
 
 📅 *Waktu Pemesanan:* ${orderTime}
@@ -3887,7 +4352,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
     }
 
     function switchAdminTab(tabId) {
-      const tabs = ["tabMenu", "tabCategory", "tabStore", "tabSecurity", "tabGuide"];
+      const tabs = ["tabMenu", "tabPackage", "tabCategory", "tabStore", "tabSecurity", "tabGuide"];
       tabs.forEach(t => {
         const content = document.getElementById(`${t}Content`);
         const btn = document.getElementById(`btn${t.charAt(0).toUpperCase() + t.slice(1)}`);
@@ -3900,8 +4365,13 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       if (activeContent) activeContent.classList.remove("hidden");
       if (activeBtn) activeBtn.className = "px-3.5 py-2 border-b-2 border-jp-crimson text-stone-900 bg-white rounded-t-lg transition cursor-pointer flex items-center gap-1.5 whitespace-nowrap";
 
+      if (tabId === "tabPackage") {
+        renderAdminPackageList();
+      }
+
       if (window.lucide) window.lucide.createIcons();
     }
+
 
     function saveStoreProfile() {
       const name = document.getElementById("adminInputStoreName").value.trim();
@@ -4358,7 +4828,832 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       }
     }
 
+    /**
+     * =========================================================================
+     * KATALOG MENU PAKET (HALAMAN BARU / MODAL DEDIKASI & ADMIN MANAGEMENT)
+     * =========================================================================
+     */
+    function openPackageMenuPage() {
+      const backdrop = document.getElementById("packageMenuModalBackdrop");
+      const panel = document.getElementById("packageMenuModalPanel");
+      if (!backdrop || !panel) return;
+
+      renderPackageMenuCards();
+
+      backdrop.classList.remove("pointer-events-none", "opacity-0");
+      backdrop.classList.add("opacity-100");
+
+      requestAnimationFrame(() => {
+        panel.classList.remove("scale-95");
+        panel.classList.add("scale-100");
+      });
+      document.body.classList.add("overflow-hidden");
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function closePackageMenuPage() {
+      const backdrop = document.getElementById("packageMenuModalBackdrop");
+      const panel = document.getElementById("packageMenuModalPanel");
+      if (!backdrop || !panel) return;
+
+      panel.classList.remove("scale-100");
+      panel.classList.add("scale-95");
+      backdrop.classList.remove("opacity-100");
+      backdrop.classList.add("opacity-0", "pointer-events-none");
+      document.body.classList.remove("overflow-hidden");
+    }
+
+    function handlePackageMenuBackdropClick(event) {
+      if (event.target === document.getElementById("packageMenuModalBackdrop")) {
+        closePackageMenuPage();
+      }
+    }
+
+    function parseVariationsInput(inputStr) {
+      if (!inputStr || !inputStr.trim()) return [];
+      const groups = inputStr.split(/[\n|]+/).map(g => g.trim()).filter(Boolean);
+      const options = [];
+      groups.forEach(g => {
+        const colonIdx = g.indexOf(":");
+        if (colonIdx !== -1) {
+          const name = g.slice(0, colonIdx).trim();
+          const choicesStr = g.slice(colonIdx + 1).trim();
+          const choices = choicesStr.split(/[,]+/).map(c => c.trim()).filter(Boolean);
+          if (name && choices.length > 0) {
+            options.push({ name, choices });
+          }
+        }
+      });
+      return options;
+    }
+
+    function formatVariationsToString(options) {
+      if (!options || !Array.isArray(options) || options.length === 0) return "";
+      return options.map(opt => `${opt.name}: ${(opt.choices || []).join(", ")}`).join(" | ");
+    }
+
+    function getPackageCurrentSelectedPrice(pkgId) {
+      const pkg = PACKAGE_MENUS.find(p => p.id === pkgId);
+      if (!pkg) return 0;
+      let total = Number(pkg.price) || 0;
+      const selects = document.querySelectorAll(`[id^="pkgOpt_${pkgId}_"]`);
+      selects.forEach(sel => {
+        const val = sel.value;
+        const match = val.match(/\+Rp\s*([\d.]+)/i);
+        if (match) {
+          total += Number(match[1].replace(/\./g, '')) || 0;
+        }
+      });
+      return total;
+    }
+
+    function updatePackageCardPrice(pkgId) {
+      const display = document.getElementById(`pkgPriceDisplay_${pkgId}`);
+      if (!display) return;
+      const currentPrice = getPackageCurrentSelectedPrice(pkgId);
+      display.textContent = currencyFormatter.format(currentPrice);
+    }
+
+    function updatePackageCardsCartCount() {
+      if (!Array.isArray(PACKAGE_MENUS)) return;
+      PACKAGE_MENUS.forEach(pkg => {
+        const statusContainer = document.getElementById(`pkgCartStatus_${pkg.id}`);
+        if (!statusContainer) return;
+
+        const existingCartItems = cart.filter(item => item.product && item.product.id === pkg.id);
+        const countInCart = existingCartItems.reduce((acc, it) => acc + (it.quantity || 1), 0);
+
+        if (countInCart > 0) {
+          statusContainer.innerHTML = `
+            <div class="p-2.5 bg-emerald-950/70 border border-emerald-500/40 rounded-xl flex items-center justify-between text-xs animate-in fade-in transition-all">
+              <div class="flex items-center gap-2 text-emerald-300 font-bold text-[11px]">
+                <i data-lucide="shopping-cart" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+                <span>${countInCart}x sudah di Keranjang Utama</span>
+              </div>
+              <button 
+                type="button" 
+                onclick="closePackageMenuPage(); openCartModal();" 
+                class="text-amber-400 hover:text-amber-300 font-bold underline text-[11px] flex items-center gap-1 cursor-pointer bg-stone-900 px-2.5 py-1 rounded-lg border border-stone-700/80 hover:border-amber-400 transition"
+              >
+                <span>Lihat Keranjang &rarr;</span>
+              </button>
+            </div>
+          `;
+        } else {
+          statusContainer.innerHTML = '';
+        }
+      });
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function showPackageCartToast(packageName, totalCount) {
+      const container = document.getElementById("toastContainer");
+      if (!container) return;
+
+      const toast = document.createElement("div");
+      toast.className = "pointer-events-auto bg-stone-900 text-white text-xs p-3 rounded-2xl shadow-2xl border border-emerald-500/50 flex items-center gap-3 transform transition-all duration-300 translate-y-3 opacity-0 ring-2 ring-emerald-500/30 max-w-sm";
+      toast.innerHTML = `
+        <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0 animate-bounce">
+          <i data-lucide="shopping-cart" class="w-4.5 h-4.5"></i>
+        </div>
+        <div class="flex-1 min-w-0 pr-1">
+          <div class="flex items-center gap-1.5">
+            <span class="font-black text-emerald-400 text-[11px] uppercase tracking-wide">Masuk Keranjang Utama</span>
+            <span class="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-1.5 py-0.2 rounded-full font-bold">${totalCount} porsi</span>
+          </div>
+          <p class="font-medium text-stone-200 text-xs truncate mt-0.5">${packageName}</p>
+        </div>
+        <button 
+          onclick="closePackageMenuPage(); openCartModal(); this.parentElement.remove();" 
+          class="text-[11px] font-bold text-amber-400 hover:text-amber-300 underline shrink-0 cursor-pointer ml-1"
+        >
+          Lihat &rarr;
+        </button>
+      `;
+
+      container.appendChild(toast);
+      if (window.lucide) window.lucide.createIcons();
+
+      requestAnimationFrame(() => {
+        toast.classList.remove("translate-y-3", "opacity-0");
+        toast.classList.add("translate-y-0", "opacity-100");
+      });
+
+      setTimeout(() => {
+        toast.classList.remove("translate-y-0", "opacity-100");
+        toast.classList.add("translate-y-3", "opacity-0");
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function triggerPackageCartAnimation(pkgId, pkgName) {
+      // 1. Animate card button
+      const btn = document.getElementById(`pkgBtn_${pkgId}`);
+      if (btn) {
+        btn.classList.remove("from-red-600", "via-jp-crimson", "to-rose-700", "hover:from-red-500", "hover:to-red-600");
+        btn.classList.add("bg-emerald-600", "ring-2", "ring-emerald-400", "text-white", "shadow-emerald-950/60");
+        btn.innerHTML = `
+          <i data-lucide="shopping-cart" class="w-4 h-4 text-white animate-bounce"></i>
+          <span>Masuk Keranjang!</span>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+
+        setTimeout(() => {
+          if (btn) {
+            btn.classList.remove("bg-emerald-600", "ring-2", "ring-emerald-400", "text-white", "shadow-emerald-950/60");
+            btn.classList.add("from-red-600", "via-jp-crimson", "to-rose-700", "hover:from-red-500", "hover:to-red-600");
+            btn.innerHTML = `
+              <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+              <span>+ Pesan Paket Lagi</span>
+            `;
+            if (window.lucide) window.lucide.createIcons();
+          }
+        }, 2200);
+      }
+
+      // 2. Animate main cart buttons (Header cart & Mobile sticky bar)
+      const cartBtn = document.getElementById("cartBtn");
+      if (cartBtn) {
+        cartBtn.classList.add("ring-4", "ring-emerald-400", "scale-110", "shadow-xl", "shadow-emerald-500/30");
+        setTimeout(() => {
+          cartBtn.classList.remove("ring-4", "ring-emerald-400", "scale-110", "shadow-xl", "shadow-emerald-500/30");
+        }, 1500);
+      }
+
+      const mobileCart = document.getElementById("mobileStickyCart");
+      if (mobileCart) {
+        mobileCart.classList.add("ring-4", "ring-emerald-400");
+        setTimeout(() => {
+          mobileCart.classList.remove("ring-4", "ring-emerald-400");
+        }, 1500);
+      }
+
+      // 3. Update status container on the card
+      const existingCartItems = cart.filter(item => item.product && item.product.id === pkgId);
+      const countInCart = existingCartItems.reduce((acc, it) => acc + (it.quantity || 1), 0);
+
+      const statusContainer = document.getElementById(`pkgCartStatus_${pkgId}`);
+      if (statusContainer) {
+        statusContainer.innerHTML = `
+          <div class="p-2.5 bg-emerald-950/80 border border-emerald-500/50 rounded-xl flex items-center justify-between text-xs transition-all duration-300 ring-2 ring-emerald-400/60">
+            <div class="flex items-center gap-2 text-emerald-300 font-bold text-[11px]">
+              <i data-lucide="shopping-cart" class="w-4 h-4 text-emerald-400 animate-bounce shrink-0"></i>
+              <span>Tersimpan di Keranjang Utama (${countInCart} porsi)</span>
+            </div>
+            <button 
+              type="button" 
+              onclick="closePackageMenuPage(); openCartModal();" 
+              class="text-amber-400 hover:text-amber-300 font-black underline text-[11px] flex items-center gap-1 cursor-pointer bg-stone-900/90 px-2.5 py-1 rounded-lg border border-stone-700 hover:border-amber-400 transition"
+            >
+              <span>Buka Keranjang &rarr;</span>
+            </button>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+      }
+
+      // 4. Floating Toast Notification affirming unified cart
+      showPackageCartToast(pkgName, countInCart);
+    }
+
+    function renderPackageMenuCards() {
+      const container = document.getElementById("packageMenuListContainer");
+      if (!container) return;
+
+      const activePackages = PACKAGE_MENUS.filter(p => p.enabled !== false);
+      if (activePackages.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-full py-12 text-center text-stone-400 bg-stone-900/50 rounded-2xl border border-dashed border-stone-800 p-8">
+            <i data-lucide="gift" class="w-10 h-10 mx-auto text-stone-600 mb-2"></i>
+            <h4 class="font-bold text-white text-base">Belum Ada Menu Paket</h4>
+            <p class="text-xs text-stone-400 mt-1">Admin dapat menambahkan paket combo baru melalui panel pengaturan.</p>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
+
+      container.innerHTML = activePackages.map(pkg => {
+        const hasDiscount = pkg.originalPrice && Number(pkg.originalPrice) > Number(pkg.price);
+        const rating = (pkg.rating || 4.9).toFixed(1);
+        const reviews = pkg.reviewsCount || 150;
+        const itemsList = Array.isArray(pkg.items) ? pkg.items : (typeof pkg.items === 'string' ? pkg.items.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : []);
+
+        const options = Array.isArray(pkg.options) && pkg.options.length > 0 ? pkg.options : [
+          {
+            name: "Pilihan Minuman Paket",
+            choices: ["2x Cold Ocha Dingin (Refill)", "2x Hot Ocha Hangat", "1x Cold Ocha + 1x Lemon Ocha (+Rp 3.000)", "Kyoto Matcha Latte (+Rp 5.000)"]
+          },
+          {
+            name: "Level Pedas / Mayo",
+            choices: ["Pedas Sedang (Normal)", "Tidak Pedas (Mild)", "Ekstra Spicy Mayo (+Rp 2.000)"]
+          }
+        ];
+
+        const existingCartItems = cart.filter(item => item.product && item.product.id === pkg.id);
+        const countInCart = existingCartItems.reduce((acc, it) => acc + (it.quantity || 1), 0);
+
+        return `
+          <div class="group bg-stone-900 border border-stone-800 hover:border-red-600/50 rounded-2xl sm:rounded-3xl overflow-hidden shadow-xl hover:shadow-2xl transition-all duration-300 flex flex-col justify-between">
+            
+            <!-- Image & Badges Zone -->
+            <div class="relative h-48 sm:h-56 overflow-hidden bg-stone-950">
+              <img 
+                src="${pkg.image}" 
+                alt="${pkg.name}" 
+                class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=800&q=80';"
+              />
+              <div class="absolute inset-0 bg-gradient-to-t from-stone-900 via-transparent to-black/40 pointer-events-none"></div>
+
+              <!-- Top Floating Badges -->
+              <div class="absolute top-3 left-3 right-3 flex items-center justify-between gap-2">
+                ${pkg.badge ? `
+                  <span class="inline-flex items-center gap-1 px-3 py-1 bg-jp-crimson text-white text-[10px] sm:text-[11px] font-black rounded-lg shadow-lg tracking-wider uppercase">
+                    <i data-lucide="tag" class="w-3 h-3"></i>
+                    <span>${pkg.badge}</span>
+                  </span>
+                ` : '<span></span>'}
+
+                ${pkg.portion ? `
+                  <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-stone-900/90 backdrop-blur-md text-amber-400 border border-stone-700/80 text-[10px] sm:text-[11px] font-bold rounded-lg shadow-lg">
+                    <i data-lucide="users" class="w-3 h-3 text-amber-400"></i>
+                    <span>${pkg.portion}</span>
+                  </span>
+                ` : ''}
+              </div>
+
+              <!-- Rating Badge on Image -->
+              <div class="absolute bottom-2.5 left-3 flex items-center gap-1.5 px-2.5 py-0.5 bg-black/75 backdrop-blur-md rounded-md text-[11px] text-amber-400 font-bold border border-white/10">
+                <i data-lucide="star" class="w-3.5 h-3.5 fill-amber-400 text-amber-400"></i>
+                <span class="text-white">${rating}</span>
+                <span class="text-stone-400 font-normal text-[10px]">(${reviews})</span>
+              </div>
+            </div>
+
+            <!-- Content Zone -->
+            <div class="p-4 sm:p-5 flex-1 flex flex-col justify-between space-y-3.5">
+              <div class="space-y-3">
+                <div>
+                  <h4 class="font-display font-black text-base sm:text-lg text-white group-hover:text-amber-400 transition-colors leading-tight">
+                    ${pkg.name}
+                  </h4>
+                  
+                  <p class="text-xs text-stone-300 mt-1 leading-relaxed line-clamp-2">
+                    ${pkg.description || 'Pilihan menu paket spesial racikan chef dengan bahan segar premium.'}
+                  </p>
+                </div>
+
+                <!-- Breakdown Isi Paket -->
+                <div class="bg-stone-950/70 p-3 rounded-xl border border-stone-800/80 space-y-1.5 text-xs">
+                  <div class="text-[10px] uppercase font-bold text-stone-400 tracking-wider flex items-center gap-1 pb-1 border-b border-stone-800">
+                    <i data-lucide="list-checks" class="w-3 h-3 text-emerald-400"></i>
+                    <span>Menu Termasuk Dalam Paket:</span>
+                  </div>
+                  ${itemsList.length > 0 ? itemsList.map(item => `
+                    <div class="flex items-start gap-1.5 text-stone-300 text-[11px]">
+                      <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5"></i>
+                      <span class="font-medium">${item}</span>
+                    </div>
+                  `).join('') : `
+                    <span class="text-[11px] text-stone-400 italic">Menu paket lengkap otentik</span>
+                  `}
+                </div>
+
+                <!-- Variasi Paket (Pilihan Interaktif) -->
+                <div class="space-y-2 bg-stone-950/80 p-3 rounded-xl border border-stone-800">
+                  <div class="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center justify-between pb-1 border-b border-stone-800/80">
+                    <span class="flex items-center gap-1.5">
+                      <i data-lucide="sliders-horizontal" class="w-3 h-3 text-amber-400"></i>
+                      <span>Pilihan Variasi Paket</span>
+                    </span>
+                    <span class="text-[9px] text-stone-400 font-normal">Sesuaikan pesanan</span>
+                  </div>
+                  ${options.map((opt, optIdx) => `
+                    <div class="space-y-1">
+                      <label class="text-[11px] font-semibold text-stone-300 flex items-center justify-between">
+                        <span>${opt.name}</span>
+                        <span class="text-[9px] text-stone-500">Pilih opsi</span>
+                      </label>
+                      <select 
+                        id="pkgOpt_${pkg.id}_${optIdx}" 
+                        data-pkg-id="${pkg.id}"
+                        data-opt-name="${opt.name}"
+                        onchange="updatePackageCardPrice('${pkg.id}')"
+                        class="w-full bg-stone-900 border border-stone-700/80 hover:border-amber-400/60 focus:border-amber-400 text-stone-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none transition cursor-pointer"
+                      >
+                        ${(opt.choices || []).map((ch, chIdx) => `
+                          <option value="${ch}" ${chIdx === 0 ? 'selected' : ''}>${ch}</option>
+                        `).join('')}
+                      </select>
+                    </div>
+                  `).join('')}
+                </div>
+
+                <!-- Catatan Khusus Pesanan Paket -->
+                <div class="space-y-1 bg-stone-950/80 p-3 rounded-xl border border-stone-800">
+                  <label for="pkgNotes_${pkg.id}" class="text-[11px] font-bold text-stone-300 flex items-center gap-1.5">
+                    <i data-lucide="file-edit" class="w-3 h-3 text-amber-400"></i>
+                    <span>Catatan Khusus Paket:</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    id="pkgNotes_${pkg.id}" 
+                    placeholder="Contoh: Tanpa wasabi, saus terpisah, es sedikit..." 
+                    class="w-full bg-stone-900 border border-stone-700/80 focus:border-amber-400 text-white placeholder-stone-500 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none transition"
+                  />
+                </div>
+              </div>
+
+              <!-- Price & CTA Action Zone -->
+              <div class="pt-3 border-t border-stone-800 space-y-2.5">
+                <div class="flex items-end justify-between gap-3">
+                  <!-- Label Harga -->
+                  <div class="flex flex-col">
+                    <span class="text-[9px] uppercase tracking-wider font-bold text-stone-400 flex items-center gap-1">
+                      <i data-lucide="tag" class="w-3 h-3 text-jp-crimson"></i>
+                      <span>Label Harga Paket</span>
+                    </span>
+                    <div class="flex items-baseline gap-1.5 mt-0.5">
+                      ${hasDiscount ? `
+                        <span class="text-[11px] text-stone-500 line-through tabular-nums font-mono">
+                          ${currencyFormatter.format(pkg.originalPrice)}
+                        </span>
+                      ` : ''}
+                      <span id="pkgPriceDisplay_${pkg.id}" class="font-mono font-black text-xl text-amber-400 tabular-nums">
+                        ${currencyFormatter.format(pkg.price)}
+                      </span>
+                    </div>
+                    ${hasDiscount ? `
+                      <span class="text-[10px] text-emerald-400 font-bold">
+                        Hemat ${currencyFormatter.format(pkg.originalPrice - pkg.price)}
+                      </span>
+                    ` : ''}
+                  </div>
+
+                  <!-- Order Button -->
+                  <button 
+                    type="button"
+                    id="pkgBtn_${pkg.id}"
+                    onclick="orderPackageItem('${pkg.id}')" 
+                    class="flex-1 max-w-[200px] py-2.5 px-3 bg-gradient-to-r from-red-600 via-jp-crimson to-rose-700 hover:from-red-500 hover:to-red-600 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-red-950/50 hover:shadow-red-900/60 transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer"
+                  >
+                    <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+                    <span>+ Pesan Paket</span>
+                  </button>
+                </div>
+
+                <!-- Status Masuk Keranjang Utama (Keranjang yang sama) -->
+                <div id="pkgCartStatus_${pkg.id}">
+                  ${countInCart > 0 ? `
+                    <div class="p-2.5 bg-emerald-950/70 border border-emerald-500/40 rounded-xl flex items-center justify-between text-xs animate-in fade-in transition-all">
+                      <div class="flex items-center gap-2 text-emerald-300 font-bold text-[11px]">
+                        <i data-lucide="shopping-cart" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+                        <span>${countInCart}x sudah di Keranjang Utama</span>
+                      </div>
+                      <button 
+                        type="button" 
+                        onclick="closePackageMenuPage(); openCartModal();" 
+                        class="text-amber-400 hover:text-amber-300 font-bold underline text-[11px] flex items-center gap-1 cursor-pointer bg-stone-900 px-2.5 py-1 rounded-lg border border-stone-700/80 hover:border-amber-400 transition"
+                      >
+                        <span>Lihat Keranjang &rarr;</span>
+                      </button>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        `;
+      }).join("");
+
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function orderPackageItem(pkgId) {
+      const pkg = PACKAGE_MENUS.find(p => p.id === pkgId);
+      if (!pkg) return;
+
+      const selectedOptions = {};
+      const selects = document.querySelectorAll(`[id^="pkgOpt_${pkgId}_"]`);
+      selects.forEach(sel => {
+        const optName = sel.getAttribute("data-opt-name") || "Variasi";
+        selectedOptions[optName] = sel.value;
+      });
+
+      const notesInput = document.getElementById(`pkgNotes_${pkgId}`);
+      const userNotes = notesInput ? notesInput.value.trim() : "";
+
+      const itemsList = Array.isArray(pkg.items) ? pkg.items : (typeof pkg.items === 'string' ? pkg.items.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : []);
+      const itemsSummary = itemsList.join(", ");
+      const combinedNotes = [itemsSummary ? `Isi: ${itemsSummary}` : "", userNotes ? `Catatan: ${userNotes}` : ""].filter(Boolean).join(" | ");
+
+      const product = {
+        id: pkg.id,
+        name: pkg.name,
+        price: pkg.price,
+        image: pkg.image,
+        category: "Menu Paket"
+      };
+
+      // Simpan langsung ke keranjang yang sama dengan keranjang utama
+      addItemToCart(product, 1, selectedOptions, combinedNotes);
+
+      // Trigger efek animasi keranjang
+      triggerPackageCartAnimation(pkgId, pkg.name);
+    }
+
+    /**
+     * =========================================================================
+     * PENGATURAN MENU PAKET (ADMIN PANEL TAB "Menu Paket")
+     * =========================================================================
+     */
+    function toggleAddPackageForm() {
+      const form = document.getElementById("addPackageForm");
+      if (!form) return;
+      form.classList.toggle("hidden");
+    }
+
+    async function handlePackageLocalPhotoUpload(event, previewId, hiddenInputId) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      try {
+        showToast("Mengoptimasi ukuran foto paket...", 1500);
+        const compressedDataUrl = await compressImageFile(file, 800, 800, 0.82);
+
+        const preview = document.getElementById(previewId);
+        const hiddenInput = document.getElementById(hiddenInputId);
+
+        if (preview) preview.src = compressedDataUrl;
+        if (hiddenInput) hiddenInput.value = compressedDataUrl;
+
+        showToast("Foto paket siap disimpan!", 1800);
+      } catch (err) {
+        console.error("Gagal kompresi foto paket:", err);
+        alert("Gagal memproses foto. Silakan pilih foto lain.");
+      }
+    }
+
+    async function handlePackageItemPhotoUpload(pkgId, input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+
+      const pkg = PACKAGE_MENUS.find(p => p.id === pkgId);
+      if (!pkg) return;
+
+      try {
+        showToast(`Mengoptimasi & mengganti foto "${pkg.name}"...`, 2000);
+        const compressedDataUrl = await compressImageFile(file, 800, 800, 0.82);
+
+        pkg.image = compressedDataUrl;
+        saveAdminPackages();
+
+        renderAdminPackageList();
+        renderPackageMenuCards();
+
+        showToast(`Foto paket "${pkg.name}" berhasil diperbarui!`, 3000);
+      } catch (err) {
+        console.error("Gagal mengganti foto paket:", err);
+        alert("Gagal mengganti foto paket.");
+      }
+    }
+
+    function saveNewPackage() {
+      const nameInput = document.getElementById("newPackageName");
+      const badgeInput = document.getElementById("newPackageBadge");
+      const priceInput = document.getElementById("newPackagePrice");
+      const origPriceInput = document.getElementById("newPackageOriginalPrice");
+      const portionInput = document.getElementById("newPackagePortion");
+      const ratingInput = document.getElementById("newPackageRating");
+      const descInput = document.getElementById("newPackageDesc");
+      const itemsInput = document.getElementById("newPackageItems");
+      const varInput = document.getElementById("newPackageVariations");
+      const imageInput = document.getElementById("newPackageImage");
+
+      if (!nameInput || !priceInput) return;
+
+      const name = nameInput.value.trim();
+      const price = Number(priceInput.value) || 0;
+
+      if (!name) return alert("Nama paket tidak boleh kosong!");
+      if (price <= 0) return alert("Harga paket harus lebih besar dari Rp 0!");
+
+      const badge = badgeInput ? badgeInput.value.trim() : "";
+      const originalPrice = origPriceInput && origPriceInput.value ? Number(origPriceInput.value) : null;
+      const portion = portionInput ? portionInput.value.trim() : "2 Orang";
+      const rating = ratingInput && ratingInput.value ? Number(ratingInput.value) : 4.9;
+      const description = descInput ? descInput.value.trim() : "";
+      const rawItems = itemsInput ? itemsInput.value.trim() : "";
+      const items = rawItems ? rawItems.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : [];
+      const image = imageInput && imageInput.value.trim() ? imageInput.value.trim() : "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=800&q=80";
+
+      const parsedOptions = parseVariationsInput(varInput ? varInput.value : "");
+      const options = parsedOptions.length > 0 ? parsedOptions : [
+        {
+          name: "Pilihan Minuman Paket",
+          choices: ["2x Cold Ocha Dingin (Refill)", "2x Hot Ocha Hangat", "1x Cold Ocha + 1x Lemon Ocha (+Rp 3.000)", "Kyoto Matcha Latte (+Rp 5.000)"]
+        },
+        {
+          name: "Level Pedas / Mayo",
+          choices: ["Pedas Sedang (Normal)", "Tidak Pedas (Mild)", "Ekstra Spicy Mayo (+Rp 2.000)"]
+        }
+      ];
+
+      const newPkg = {
+        id: `pkg-${Date.now()}`,
+        name,
+        badge,
+        price,
+        originalPrice,
+        portion,
+        rating,
+        reviewsCount: 1,
+        description,
+        items,
+        options,
+        image,
+        enabled: true
+      };
+
+      PACKAGE_MENUS.unshift(newPkg);
+      saveAdminPackages();
+
+      renderAdminPackageList();
+      renderPackageMenuCards();
+
+      // Reset form
+      nameInput.value = "";
+      if (badgeInput) badgeInput.value = "";
+      priceInput.value = "";
+      if (origPriceInput) origPriceInput.value = "";
+      if (descInput) descInput.value = "";
+      if (itemsInput) itemsInput.value = "";
+      if (varInput) varInput.value = "";
+      toggleAddPackageForm();
+
+      showToast(`Menu paket "${name}" berhasil ditambahkan!`);
+    }
+
+    function updatePackageItemProp(pkgId, prop, val) {
+      const pkg = PACKAGE_MENUS.find(p => p.id === pkgId);
+      if (!pkg) return;
+
+      if (prop === "price" || prop === "originalPrice") {
+        pkg[prop] = val ? Math.max(0, Number(val) || 0) : null;
+      } else if (prop === "name" || prop === "badge" || prop === "portion" || prop === "description") {
+        pkg[prop] = val.trim();
+      } else if (prop === "enabled") {
+        pkg.enabled = !!val;
+      } else if (prop === "items") {
+        pkg.items = val.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+      } else if (prop === "optionsString") {
+        pkg.options = parseVariationsInput(val);
+      }
+
+      saveAdminPackages();
+      renderPackageMenuCards();
+    }
+
+    function executeDeletePackage(pkgId) {
+      const pkg = PACKAGE_MENUS.find(p => p.id === pkgId);
+      const name = pkg ? pkg.name : "Paket";
+
+      if (confirm(`Hapus menu paket "${name}"?`)) {
+        PACKAGE_MENUS = PACKAGE_MENUS.filter(p => p.id !== pkgId);
+        saveAdminPackages();
+
+        if (window.FirestoreSync && window.FirestoreSync.deletePackageFromFirestore) {
+          window.FirestoreSync.deletePackageFromFirestore(pkgId);
+        }
+
+        renderAdminPackageList();
+        renderPackageMenuCards();
+        showToast(`Menu paket "${name}" berhasil dihapus.`);
+      }
+    }
+
+    function resetToDefaultPackages() {
+      if (confirm("Kembalikan katalog menu paket ke default?")) {
+        PACKAGE_MENUS = JSON.parse(JSON.stringify(DEFAULT_PACKAGE_MENUS));
+        saveAdminPackages();
+        renderAdminPackageList();
+        renderPackageMenuCards();
+        showToast("Katalog menu paket dikembalikan ke default!");
+      }
+    }
+
+    function renderAdminPackageList() {
+      const container = document.getElementById("adminPackageList");
+      if (!container) return;
+
+      if (!PACKAGE_MENUS || PACKAGE_MENUS.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-6 bg-stone-50 rounded-xl border border-dashed border-stone-300 text-stone-500 text-xs">
+            <i data-lucide="gift" class="w-6 h-6 mx-auto text-stone-400 mb-1"></i>
+            <p class="font-bold text-stone-700">Belum ada menu paket.</p>
+            <button onclick="resetToDefaultPackages()" class="mt-2 text-jp-crimson font-bold hover:underline cursor-pointer">
+              Muat Ulang Paket Default
+            </button>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
+
+      container.innerHTML = PACKAGE_MENUS.map(pkg => {
+        const isEnabled = pkg.enabled !== false;
+        const itemsStr = Array.isArray(pkg.items) ? pkg.items.join(", ") : (pkg.items || "");
+        const optionsStr = formatVariationsToString(pkg.options);
+
+        return `
+          <div class="p-3.5 bg-stone-50/80 hover:bg-stone-50 border border-stone-200 rounded-xl space-y-3 transition">
+            
+            <!-- Row 1: Image, Main Props, Delete -->
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              
+              <div class="flex items-center gap-3 flex-1 min-w-0">
+                <!-- Image thumbnail with replace button -->
+                <div class="relative w-14 h-14 rounded-lg overflow-hidden border border-stone-200 shrink-0 group/img">
+                  <img 
+                    src="${pkg.image}" 
+                    alt="${pkg.name}" 
+                    class="w-full h-full object-cover"
+                    onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80';"
+                  />
+                  <label class="absolute inset-0 bg-black/60 opacity-0 group-hover/img:opacity-100 flex items-center justify-center text-white text-[9px] font-bold cursor-pointer transition">
+                    Ganti
+                    <input type="file" accept="image/*" class="hidden" onchange="handlePackageItemPhotoUpload('${pkg.id}', this)" />
+                  </label>
+                </div>
+
+                <div class="flex-1 min-w-0 space-y-1">
+                  <div class="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      ${isEnabled ? 'checked' : ''} 
+                      onchange="updatePackageItemProp('${pkg.id}', 'enabled', this.checked)"
+                      class="rounded text-jp-crimson focus:ring-0 w-3.5 h-3.5 cursor-pointer shrink-0"
+                      title="Aktifkan / Nonaktifkan paket ini"
+                    />
+                    <input 
+                      type="text" 
+                      value="${pkg.name}" 
+                      onchange="updatePackageItemProp('${pkg.id}', 'name', this.value)"
+                      placeholder="Nama Paket" 
+                      class="font-bold text-xs text-stone-900 bg-white border border-stone-200 hover:border-stone-400 focus:border-jp-crimson px-2 py-1 rounded w-full focus:outline-none"
+                    />
+                  </div>
+                  
+                  <div class="flex items-center gap-2 flex-wrap text-[11px]">
+                    <div class="flex items-center gap-1">
+                      <span class="text-stone-400 text-[10px]">Badge:</span>
+                      <input 
+                        type="text" 
+                        value="${pkg.badge || ''}" 
+                        placeholder="Hemat 25%" 
+                        onchange="updatePackageItemProp('${pkg.id}', 'badge', this.value)"
+                        class="bg-white border border-stone-200 px-1.5 py-0.5 rounded text-[11px] w-28 text-stone-700 font-semibold focus:outline-none focus:border-jp-crimson"
+                      />
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <span class="text-stone-400 text-[10px]">Porsi:</span>
+                      <input 
+                        type="text" 
+                        value="${pkg.portion || ''}" 
+                        placeholder="2 Orang" 
+                        onchange="updatePackageItemProp('${pkg.id}', 'portion', this.value)"
+                        class="bg-white border border-stone-200 px-1.5 py-0.5 rounded text-[11px] w-24 text-stone-700 font-semibold focus:outline-none focus:border-jp-crimson"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Price inputs & Actions -->
+              <div class="flex items-center gap-2 self-end sm:self-center shrink-0">
+                <div class="flex flex-col items-end gap-1">
+                  <div class="flex items-center gap-1 bg-white border border-stone-200 rounded px-2 py-1">
+                    <span class="text-[10px] font-bold text-jp-crimson">Harga Promo: Rp</span>
+                    <input 
+                      type="number" 
+                      value="${pkg.price || 0}" 
+                      onchange="updatePackageItemProp('${pkg.id}', 'price', this.value)"
+                      class="font-mono font-bold text-xs text-stone-900 w-20 text-right focus:outline-none"
+                    />
+                  </div>
+                  <div class="flex items-center gap-1 bg-stone-100 border border-stone-200 rounded px-1.5 py-0.5 text-[10px]">
+                    <span class="text-stone-400">Coret: Rp</span>
+                    <input 
+                      type="number" 
+                      value="${pkg.originalPrice || ''}" 
+                      placeholder="0"
+                      onchange="updatePackageItemProp('${pkg.id}', 'originalPrice', this.value)"
+                      class="font-mono text-[10px] text-stone-500 w-16 text-right focus:outline-none bg-transparent"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  type="button"
+                  onclick="executeDeletePackage('${pkg.id}')" 
+                  class="p-2 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                  title="Hapus menu paket ini"
+                >
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+              </div>
+
+            </div>
+
+            <!-- Row 2: Deskripsi & Daftar Menu Didalam Paket -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-stone-200/80 text-[11px]">
+              <div>
+                <span class="text-[10px] text-stone-500 font-bold block mb-0.5">Deskripsi Singkat:</span>
+                <input 
+                  type="text" 
+                  value="${pkg.description || ''}" 
+                  placeholder="Kombinasi sushi roll lezat..." 
+                  onchange="updatePackageItemProp('${pkg.id}', 'description', this.value)"
+                  class="w-full bg-white border border-stone-200 px-2 py-1 rounded text-stone-700 text-xs focus:outline-none focus:border-jp-crimson"
+                />
+              </div>
+
+              <div>
+                <span class="text-[10px] text-stone-500 font-bold block mb-0.5">Daftar Isi Paket (Pisahkan Koma):</span>
+                <input 
+                  type="text" 
+                  value="${itemsStr}" 
+                  placeholder="1x Salmon Mentai Roll, 2x Cold Ocha..." 
+                  onchange="updatePackageItemProp('${pkg.id}', 'items', this.value)"
+                  class="w-full bg-white border border-stone-200 px-2 py-1 rounded text-stone-700 text-xs focus:outline-none focus:border-jp-crimson"
+                />
+              </div>
+            </div>
+
+            <!-- Row 3: Pengaturan Variasi Paket -->
+            <div class="pt-2 border-t border-stone-200/80 text-[11px]">
+              <span class="text-[10px] text-stone-500 font-bold block mb-0.5">Pilihan Variasi Paket (Format: Grup 1: Opsi A, Opsi B | Grup 2: Opsi X, Opsi Y (+Rp 3.000)):</span>
+              <input 
+                type="text" 
+                value="${optionsStr}" 
+                placeholder="Pilihan Minuman: 2x Cold Ocha, 2x Hot Ocha | Level Pedas: Normal, Ekstra Pedas (+Rp 2.000)" 
+                onchange="updatePackageItemProp('${pkg.id}', 'optionsString', this.value)"
+                class="w-full bg-white border border-stone-200 px-2 py-1 rounded text-stone-700 text-xs focus:outline-none focus:border-jp-crimson"
+              />
+            </div>
+
+          </div>
+        `;
+      }).join("");
+
+      if (window.lucide) window.lucide.createIcons();
+    }
+
     function openAdminVariationEditor(productId) {
+
       const product = PRODUCTS.find(p => p.id === productId);
       if (!product) return;
 
@@ -5153,6 +6448,44 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       } catch (e) {}
     }
 
+    function saveAdminPackages() {
+      try {
+        localStorage.setItem("utori_package_menus", JSON.stringify(PACKAGE_MENUS));
+        window.PACKAGE_MENUS = PACKAGE_MENUS;
+        if (window.FirestoreSync && window.FirestoreSync.syncPackagesToFirestore) {
+          window.FirestoreSync.syncPackagesToFirestore(PACKAGE_MENUS);
+        }
+      } catch (e) {}
+    }
+
+    function loadAdminPackages() {
+      try {
+        const saved = localStorage.getItem("utori_package_menus");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            PACKAGE_MENUS = parsed.map(pkg => {
+              const defaultMatch = DEFAULT_PACKAGE_MENUS.find(dp => dp.id === pkg.id);
+              if (!pkg.options || !Array.isArray(pkg.options) || pkg.options.length === 0) {
+                pkg.options = defaultMatch && defaultMatch.options ? JSON.parse(JSON.stringify(defaultMatch.options)) : [
+                  {
+                    name: "Pilihan Minuman Paket",
+                    choices: ["2x Cold Ocha Dingin (Refill)", "2x Hot Ocha Hangat", "1x Cold Ocha + 1x Lemon Ocha (+Rp 3.000)", "Kyoto Matcha Latte (+Rp 5.000)"]
+                  },
+                  {
+                    name: "Level Pedas / Mayo",
+                    choices: ["Pedas Sedang (Normal)", "Tidak Pedas (Mild)", "Ekstra Spicy Mayo (+Rp 2.000)"]
+                  }
+                ];
+              }
+              return pkg;
+            });
+          }
+        }
+      } catch (e) {}
+    }
+
+
     window.onFirestoreConfigUpdate = function(newConfig) {
       if (!newConfig) return;
       CONFIG = { ...CONFIG, ...newConfig };
@@ -5193,6 +6526,15 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       updateCartUI();
     };
 
+    window.onFirestorePackagesUpdate = function(newPackages) {
+      if (!Array.isArray(newPackages) || newPackages.length === 0) return;
+      PACKAGE_MENUS = newPackages;
+      window.PACKAGE_MENUS = PACKAGE_MENUS;
+      try { localStorage.setItem("utori_package_menus", JSON.stringify(PACKAGE_MENUS)); } catch (e) {}
+      renderPackageMenuCards();
+      renderAdminPackageList();
+    };
+
     /**
      * SINKRONISASI LENGKAP KE CLOUD FIRESTORE
      * Dipanggil oleh tombol "💾 Simpan ke Cloud Firestore" di panel admin.
@@ -5203,7 +6545,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
     async function saveAllToCloudFirestore() {
       const btn = document.getElementById("btnSaveAllToFirestore");
       const btnText = document.getElementById("btnSaveAllText");
-      const originalText = btnText ? btnText.textContent : "💾 Simpan ke Cloud Firestore";
+      const originalText = "Simpan ke Cloud";
 
       try {
         if (btn) {
@@ -5211,7 +6553,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
           btn.classList.add("opacity-75", "cursor-wait");
         }
         if (btnText) {
-          btnText.textContent = "⏳ Menyimpan ke Cloud Firestore...";
+          btnText.textContent = "⏳ Menyimpan...";
         }
 
         // 1. Ambil input dari form profil toko Tab 3 jika sedang diisi
@@ -5231,48 +6573,73 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         if (inputHours && inputHours.value.trim()) CONFIG.hours = inputHours.value.trim();
         if (inputMaps && inputMaps.value.trim()) CONFIG.mapsUrl = inputMaps.value.trim();
 
-        // 2. Simpan ke local storage
+        // 2. Simpan ke local storage terlebih dahulu (agar data 100% aman tersimpan di browser)
         localStorage.setItem("shinzan_admin_config", JSON.stringify(CONFIG));
         localStorage.setItem("shinzan_admin_categories", JSON.stringify(CATEGORIES));
         localStorage.setItem("shinzan_admin_products", JSON.stringify(PRODUCTS));
         localStorage.setItem("utori_admin_extras", JSON.stringify(EXTRAS));
+        localStorage.setItem("utori_package_menus", JSON.stringify(PACKAGE_MENUS));
 
         window.CONFIG = CONFIG;
         window.CATEGORIES = CATEGORIES;
         window.PRODUCTS = PRODUCTS;
         window.EXTRAS = EXTRAS;
+        window.PACKAGE_MENUS = PACKAGE_MENUS;
 
-        // 3. Simpan ke Cloud Firestore secara asynchronous dan tunggu sampai selesai
+        // 3. Simpan ke Cloud Firestore secara paralel dengan batas waktu tunggu (timeout 6s) agar tidak macet/hang
+        let cloudSynced = false;
         if (window.FirestoreSync) {
-          if (window.FirestoreSync.syncConfigToFirestore) {
-            await window.FirestoreSync.syncConfigToFirestore(CONFIG);
-          }
-          if (window.FirestoreSync.syncCategoriesToFirestore) {
-            await window.FirestoreSync.syncCategoriesToFirestore(CATEGORIES);
-          }
-          if (window.FirestoreSync.syncProductsToFirestore) {
-            await window.FirestoreSync.syncProductsToFirestore(PRODUCTS);
-          }
-          if (window.FirestoreSync.syncExtrasToFirestore) {
-            await window.FirestoreSync.syncExtrasToFirestore(EXTRAS);
+          try {
+            const syncOps = [];
+            if (window.FirestoreSync.syncConfigToFirestore) {
+              syncOps.push(window.FirestoreSync.syncConfigToFirestore(CONFIG));
+            }
+            if (window.FirestoreSync.syncCategoriesToFirestore) {
+              syncOps.push(window.FirestoreSync.syncCategoriesToFirestore(CATEGORIES));
+            }
+            if (window.FirestoreSync.syncProductsToFirestore) {
+              syncOps.push(window.FirestoreSync.syncProductsToFirestore(PRODUCTS));
+            }
+            if (window.FirestoreSync.syncExtrasToFirestore) {
+              syncOps.push(window.FirestoreSync.syncExtrasToFirestore(EXTRAS));
+            }
+            if (window.FirestoreSync.syncPackagesToFirestore) {
+              syncOps.push(window.FirestoreSync.syncPackagesToFirestore(PACKAGE_MENUS));
+            }
+
+            await Promise.race([
+              Promise.all(syncOps),
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout koneksi Firestore")), 6000))
+            ]);
+            cloudSynced = true;
+          } catch (syncErr) {
+            console.warn("Sinkronisasi Firestore offline atau tertunda:", syncErr);
           }
         }
 
-        // 4. Update seluruh tampilan
+        // 4. Update seluruh tampilan katalog & toko
         applyStoreConfigToUI();
         renderCategoryTabs();
         renderProducts();
+        renderPackageMenuCards();
         renderHeroSlideshow();
         renderAdminMenuList();
+        renderAdminPackageList();
         renderAdminCategoryList();
         renderAdminExtrasList();
         renderAdminSlideshowSettings();
         updateCartUI();
 
         if (btnText) {
-          btnText.textContent = "✅ Berhasil Disimpan ke Cloud!";
+          btnText.textContent = cloudSynced ? "✅ Tersimpan di Cloud!" : "✅ Tersimpan (Lokal)";
         }
-        showToast("✅ Berhasil! Seluruh data & foto tersimpan ke Cloud Firestore dan tidak hilang saat di-refresh.", 4000);
+
+        
+        if (cloudSynced) {
+          showToast("✅ Berhasil! Seluruh data & foto tersimpan di Cloud Firestore dan tidak hilang saat refresh.", 3500);
+        } else {
+          showToast("💾 Data berhasil disimpan di browser ini. Sinkronisasi Cloud akan berlanjut otomatis.", 3500);
+        }
 
         setTimeout(() => {
           if (btnText) btnText.textContent = originalText;
@@ -5280,16 +6647,30 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
             btn.disabled = false;
             btn.classList.remove("opacity-75", "cursor-wait");
           }
-        }, 2500);
+        }, 2000);
 
       } catch (err) {
-        console.error("Gagal simpan ke Cloud Firestore:", err);
+        console.error("Gagal simpan:", err);
         if (btnText) btnText.textContent = "❌ Gagal Simpan";
-        if (btn) {
-          btn.disabled = false;
-          btn.classList.remove("opacity-75", "cursor-wait");
-        }
-        alert("Gagal menyimpan ke Cloud Firestore: " + (err.message || err));
+        showToast("Terjadi kendala saat menyimpan: " + (err.message || err), 3500);
+        setTimeout(() => {
+          if (btnText) btnText.textContent = originalText;
+          if (btn) {
+            btn.disabled = false;
+            btn.classList.remove("opacity-75", "cursor-wait");
+          }
+        }, 2000);
+      } finally {
+        // Jaminan tombol tidak pernah macet / disabled permanen
+        setTimeout(() => {
+          if (btn && btn.disabled) {
+            btn.disabled = false;
+            btn.classList.remove("opacity-75", "cursor-wait");
+            if (btnText && btnText.textContent.includes("⏳")) {
+              btnText.textContent = originalText;
+            }
+          }
+        }, 6500);
       }
     }
 
@@ -5326,11 +6707,14 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
     function downloadSelfFile() {
       let currentHtml = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
       
-      // Inject current products and config as default in the downloaded file for GitHub Pages
+      // Inject current products, package menus and config as default in the downloaded file for GitHub Pages
       try {
         const prodJson = JSON.stringify(PRODUCTS, null, 2);
         currentHtml = currentHtml.replace(/const DEFAULT_PRODUCTS = \[[\s\S]*?\];/, 'const DEFAULT_PRODUCTS = ' + prodJson + ';');
+        const pkgJson = JSON.stringify(PACKAGE_MENUS, null, 2);
+        currentHtml = currentHtml.replace(/const DEFAULT_PACKAGE_MENUS = \[[\s\S]*?\];/, 'const DEFAULT_PACKAGE_MENUS = ' + pkgJson + ';');
       } catch(e) {}
+
 
       const blob = new Blob([currentHtml], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
