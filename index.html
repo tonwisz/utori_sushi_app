@@ -1274,6 +1274,20 @@
           </button>
         </div>
 
+        <!-- Live Order POS Status Notice (Appears after sending order to Android POS, remains visible even when cart is cleared) -->
+        <div id="posLiveOrderBanner" class="hidden mx-3 sm:mx-4 mt-3 shrink-0 rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-[11px] text-emerald-900 space-y-0.5">
+          <div class="flex items-center justify-between font-bold">
+            <span class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span id="posOrderStatusTitle">Terkirim ke POS Kasir</span>
+            </span>
+            <span id="posOrderIdBadge" class="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700"></span>
+          </div>
+          <p id="posOrderStatusDesc" class="text-[10px] opacity-90 leading-snug">
+            Pesanan Anda sudah masuk ke layar kasir UTORI POS (Status: PENDING).
+          </p>
+        </div>
+
         <!-- Cart Items List Container -->
         <div id="cartItemsContainer" class="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 divide-y divide-stone-100">
           <!-- Populated by JavaScript -->
@@ -1369,20 +1383,6 @@
               <span>Total Ekstra/Pelengkap:</span>
               <span class="font-mono tabular-nums text-emerald-700 font-bold" id="cartExtrasTotalText">+Rp 0</span>
             </div>
-          </div>
-
-          <!-- Live Order POS Status Notice (Appears after sending order to Android POS) -->
-          <div id="posLiveOrderBanner" class="hidden rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-[11px] text-emerald-900 space-y-0.5">
-            <div class="flex items-center justify-between font-bold">
-              <span class="flex items-center gap-1.5">
-                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span id="posOrderStatusTitle">Terkirim ke POS Kasir</span>
-              </span>
-              <span id="posOrderIdBadge" class="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700"></span>
-            </div>
-            <p id="posOrderStatusDesc" class="text-[10px] opacity-90 leading-snug">
-              Pesanan Anda sudah masuk ke layar kasir UTORI POS (Status: PENDING).
-            </p>
           </div>
 
           <!-- Bottom Action Bar: TOTAL HARGA & TOMBOL CHECKOUT -->
@@ -3858,18 +3858,24 @@
       clearCartConfirmTimer = setTimeout(resetClearCartBtn, 7000);
     }
 
-    function executeClearCart() {
+    function clearCartAfterOrder() {
       if (clearCartConfirmTimer) {
         clearTimeout(clearCartConfirmTimer);
         clearCartConfirmTimer = null;
       }
       cart = [];
       selectedCartExtras = {};
+      const notesInput = document.getElementById("orderNotes");
+      if (notesInput) notesInput.value = "";
       saveCartToStorage();
       updateCartUI();
       renderProducts();
       renderCartExtrasUI();
       resetClearCartBtn();
+    }
+
+    function executeClearCart() {
+      clearCartAfterOrder();
       showToast("Keranjang berhasil dikosongkan");
     }
 
@@ -4397,7 +4403,8 @@
       }
 
       if (result.ok) {
-        showToast(`✅ Pesanan #${data.orderId} otomatis muncul di UTORI POS Kasir!`, 4000);
+        clearCartAfterOrder();
+        showToast(`✅ Pesanan #${data.orderId} terkirim ke UTORI POS Kasir!`, 4000);
       } else {
         showToast(`⚠️ Gagal kirim ke POS: ${result.error}`, 4500);
       }
@@ -4420,21 +4427,6 @@
         extrasTotal,
         grandTotal
       } = data;
-
-      // Pastikan data tersimpan ke Firestore sebelum berpindah ke WhatsApp (maks tunggu 2.5 detik agar popup tetap diizinkan)
-      const syncPromise = syncOrderToAndroidPOS(orderId, posPayload);
-      const syncResult = await Promise.race([
-        syncPromise,
-        new Promise((resolve) => setTimeout(() => resolve({ ok: true, pending: true }), 2500))
-      ]);
-
-      if (syncResult && syncResult.ok === false) {
-        showToast(`⚠️ Gagal kirim ke POS (${syncResult.error}), tetap membuka WhatsApp...`, 4500);
-      } else if (syncResult && !syncResult.pending) {
-        showToast(`✅ Pesanan #${orderId} terkirim ke UTORI POS Kasir & WhatsApp!`, 4000);
-      } else {
-        showToast("Mengirim ke POS Kasir & membuka WhatsApp...", 3500);
-      }
 
       const typeLabels = {
         delivery: "Pesan Antar (Delivery)",
@@ -4509,6 +4501,23 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
 
       const encodedMessage = encodeURIComponent(messageText);
       const whatsappUrl = `https://wa.me/${CONFIG.whatsappNumber}?text=${encodedMessage}`;
+
+      // Pastikan data tersimpan ke Firestore sebelum berpindah ke WhatsApp (maks tunggu 2.5 detik agar popup tetap diizinkan)
+      const syncPromise = syncOrderToAndroidPOS(orderId, posPayload);
+      const syncResult = await Promise.race([
+        syncPromise,
+        new Promise((resolve) => setTimeout(() => resolve({ ok: true, pending: true }), 2500))
+      ]);
+
+      clearCartAfterOrder();
+
+      if (syncResult && syncResult.ok === false) {
+        showToast(`⚠️ Gagal kirim ke POS (${syncResult.error}), tetap membuka WhatsApp...`, 4500);
+      } else if (syncResult && !syncResult.pending) {
+        showToast(`✅ Pesanan #${orderId} terkirim ke UTORI POS Kasir & WhatsApp!`, 4000);
+      } else {
+        showToast("Mengirim ke POS Kasir & membuka WhatsApp...", 3500);
+      }
 
       window.open(whatsappUrl, "_blank", "noopener,noreferrer");
     }
