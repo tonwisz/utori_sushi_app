@@ -56,6 +56,19 @@ service cloud.firestore {
       allow list: if true;
       allow write: if isValidId(packageId) && (isAdmin() || true);
     }
+
+    // Pesanan Konsumen Real-time (Website <-> POS Kasir Android UTORI POS)
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId);
+      allow list: if true;
+      allow create: if isValidId(orderId)
+        && request.resource.data.status is string
+        && request.resource.data.totalAmount is number
+        && request.resource.data.items is list;
+      allow update: if isValidId(orderId)
+        && request.resource.data.status is string;
+      allow delete: if isValidId(orderId);
+    }
   }
 }
 

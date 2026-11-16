@@ -203,6 +203,50 @@ export async function deletePackageFromFirestore(pkgId: string) {
   }
 }
 
+export async function submitOrderToFirestore(orderData: Record<string, any>) {
+  const docId = sanitizeDocId(orderData?.orderId || `ord-${Date.now()}`, 'ord', 0);
+  const path = `orders/${docId}`;
+  try {
+    if (!orderData || typeof orderData !== 'object') {
+      throw new Error('Data pesanan tidak valid');
+    }
+    const payload = cleanPayload({
+      ...orderData,
+      orderId: docId,
+      status: orderData.status || 'PENDING',
+      timestamp: Number(orderData.timestamp) || Date.now()
+    });
+    await setDoc(doc(db, 'orders', docId), payload);
+    return docId;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, path);
+  }
+}
+
+export function listenToOrderStatus(
+  orderId: string,
+  onStatusChange: (data: any, docId: string) => void
+) {
+  const docId = sanitizeDocId(orderId, 'ord', 0);
+  const path = `orders/${docId}`;
+  try {
+    return onSnapshot(
+      doc(db, 'orders', docId),
+      (snap) => {
+        if (snap.exists() && typeof onStatusChange === 'function') {
+          onStatusChange(snap.data(), docId);
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.GET, path);
+      }
+    );
+  } catch (err) {
+    console.error('listenToOrderStatus error:', err);
+    return null;
+  }
+}
+
 /**
  * INITIAL LOAD & REAL-TIME LISTENER
  */
@@ -333,6 +377,8 @@ export function initFirestoreDataSync() {
   syncExtrasToFirestore,
   syncPackagesToFirestore,
   deletePackageFromFirestore,
+  submitOrderToFirestore,
+  listenToOrderStatus,
   initFirestoreDataSync
 };
 
