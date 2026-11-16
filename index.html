@@ -1380,7 +1380,7 @@
               </span>
               <span id="posOrderIdBadge" class="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700"></span>
             </div>
-            <p id="posOrderStatusDesc" class="text-[10px] text-emerald-700 leading-snug">
+            <p id="posOrderStatusDesc" class="text-[10px] opacity-90 leading-snug">
               Pesanan Anda sudah masuk ke layar kasir UTORI POS (Status: PENDING).
             </p>
           </div>
@@ -4184,27 +4184,39 @@
 
     let activeOrderStatusUnsub = null;
 
-    function updatePosOrderBanner(orderId, status) {
+    function updatePosOrderBanner(orderId, status, extraMsg = "") {
       const banner = document.getElementById("posLiveOrderBanner");
       const titleEl = document.getElementById("posOrderStatusTitle");
       const idEl = document.getElementById("posOrderIdBadge");
       const descEl = document.getElementById("posOrderStatusDesc");
       if (!banner || !titleEl || !idEl || !descEl) return;
 
-      banner.classList.remove("hidden");
-      idEl.textContent = `#${orderId}`;
+      banner.classList.remove("hidden", "bg-emerald-50", "border-emerald-200", "text-emerald-900", "bg-amber-50", "border-amber-200", "text-amber-900", "bg-red-50", "border-red-200", "text-red-900");
+      idEl.textContent = orderId ? `#${orderId}` : "";
 
       const upperStatus = String(status || "PENDING").toUpperCase();
-      if (upperStatus === "PENDING") {
+      if (upperStatus === "SENDING") {
+        banner.classList.add("bg-amber-50", "border-amber-200", "text-amber-900");
+        titleEl.textContent = "Mengirim ke POS Kasir...";
+        descEl.textContent = "Sedang menyinkronkan pesanan ke database UTORI POS.";
+      } else if (upperStatus === "ERROR") {
+        banner.classList.add("bg-red-50", "border-red-200", "text-red-900");
+        titleEl.textContent = "Gagal Sinkron ke POS";
+        descEl.textContent = extraMsg || "Koneksi Firestore bermasalah. Silakan coba lagi.";
+      } else if (upperStatus === "PENDING") {
+        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
         titleEl.textContent = "Terkirim ke POS Kasir";
         descEl.textContent = "Pesanan otomatis masuk ke layar kasir UTORI POS (Menunggu konfirmasi kasir).";
       } else if (upperStatus === "ACCEPTED" || upperStatus === "PROCESSING" || upperStatus === "DIPROSES" || upperStatus === "COOKING") {
+        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
         titleEl.textContent = "Diterima & Sedang Diproses";
         descEl.textContent = `Kasir POS telah menerima pesanan Anda (Status: ${upperStatus}).`;
       } else if (upperStatus === "COMPLETED" || upperStatus === "DONE" || upperStatus === "SELESAI" || upperStatus === "PAID") {
+        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
         titleEl.textContent = "Pesanan Selesai / Siap!";
         descEl.textContent = `Pesanan Anda telah ditandai ${upperStatus} oleh kasir POS.`;
       } else {
+        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
         titleEl.textContent = `Status POS: ${upperStatus}`;
         descEl.textContent = `Pembaruan real-time dari aplikasi UTORI POS.`;
       }
@@ -4212,7 +4224,7 @@
 
     function collectOrderSubmissionData() {
       if (cart.length === 0) {
-        alert("Keranjang pesanan masih kosong. Silakan pilih menu terlebih dahulu!");
+        showToast("⚠️ Keranjang pesanan masih kosong. Silakan pilih menu terlebih dahulu!", 3500);
         return null;
       }
 
@@ -4227,14 +4239,14 @@
       const generalNotes = notesInput ? notesInput.value.trim() : "";
 
       if (!customerName) {
-        alert("Mohon isi Nama Pemesan terlebih dahulu!");
+        showToast("⚠️ Mohon isi Nama Pemesan terlebih dahulu!", 3500);
         if (nameInput) nameInput.focus();
         return null;
       }
 
       if (!location) {
         const fieldName = orderType === 'dinein' ? 'Nomor Meja' : 'Alamat Pengantaran';
-        alert(`Mohon lengkapi ${fieldName} Anda!`);
+        showToast(`⚠️ Mohon lengkapi ${fieldName} Anda!`, 3500);
         if (tableOrAddressInput) tableOrAddressInput.focus();
         return null;
       }
@@ -4270,25 +4282,31 @@
       const posItems = cart.map(item => {
         const opts = Object.values(item.selectedOptions || {}).filter(Boolean).join(", ");
         const noteStr = item.notes ? ` | Catatan: ${item.notes}` : "";
+        const priceVal = Number(item.unitPrice) || 0;
+        const qtyVal = Number(item.quantity) || 1;
         return {
           id: String(item.product.id || "item"),
           name: `${item.product.name}${opts ? ` [${opts}]` : ""}${noteStr}`,
           baseName: item.product.name,
-          quantity: Number(item.quantity) || 1,
-          unitPrice: Number(item.unitPrice) || 0,
-          subtotal: (Number(item.unitPrice) || 0) * (Number(item.quantity) || 1),
+          quantity: qtyVal,
+          price: priceVal,
+          unitPrice: priceVal,
+          subtotal: priceVal * qtyVal,
           options: item.selectedOptions || {},
           notes: item.notes || ""
         };
       });
 
       selectedExtrasList.forEach(ex => {
+        const exPrice = Number(ex.extra.price) || 0;
+        const exQty = Number(ex.quantity) || 1;
         posItems.push({
           id: String(ex.extra.id || "extra"),
           name: `[Ekstra] ${ex.extra.name}`,
           baseName: ex.extra.name,
-          quantity: Number(ex.quantity) || 1,
-          unitPrice: Number(ex.extra.price) || 0,
+          quantity: exQty,
+          price: exPrice,
+          unitPrice: exPrice,
           subtotal: Number(ex.total) || 0,
           options: {},
           notes: ""
@@ -4329,7 +4347,11 @@
     }
 
     async function syncOrderToAndroidPOS(orderId, posPayload) {
-      if (!window.FirestoreSync || !window.FirestoreSync.submitOrderToFirestore) return false;
+      updatePosOrderBanner(orderId, "SENDING");
+      if (!window.FirestoreSync || !window.FirestoreSync.submitOrderToFirestore) {
+        updatePosOrderBanner(orderId, "ERROR", "Modul FirestoreSync belum siap. Muat ulang halaman.");
+        return { ok: false, error: "FirestoreSync belum siap" };
+      }
       try {
         await window.FirestoreSync.submitOrderToFirestore(posPayload);
         updatePosOrderBanner(orderId, "PENDING");
@@ -4348,10 +4370,12 @@
             }
           });
         }
-        return true;
+        return { ok: true };
       } catch (err) {
         console.error("Gagal sinkron order ke POS Android:", err);
-        return false;
+        const errMsg = err && err.message ? err.message : "Gagal menulis ke Firestore";
+        updatePosOrderBanner(orderId, "ERROR", errMsg);
+        return { ok: false, error: errMsg };
       }
     }
 
@@ -4365,21 +4389,21 @@
         btn.classList.add("opacity-70", "cursor-wait");
       }
 
-      const synced = await syncOrderToAndroidPOS(data.orderId, data.posPayload);
+      const result = await syncOrderToAndroidPOS(data.orderId, data.posPayload);
 
       if (btn) {
         btn.disabled = false;
         btn.classList.remove("opacity-70", "cursor-wait");
       }
 
-      if (synced) {
+      if (result.ok) {
         showToast(`✅ Pesanan #${data.orderId} otomatis muncul di UTORI POS Kasir!`, 4000);
       } else {
-        showToast("⚠️ Koneksi Firestore belum siap. Silakan coba lagi atau gunakan Checkout WA.", 3500);
+        showToast(`⚠️ Gagal kirim ke POS: ${result.error}`, 4500);
       }
     }
 
-    function checkoutViaWhatsApp() {
+    async function checkoutViaWhatsApp() {
       const data = collectOrderSubmissionData();
       if (!data) return;
 
@@ -4397,12 +4421,20 @@
         grandTotal
       } = data;
 
-      // Kirim otomatis ke Cloud Firestore agar langsung muncul di UTORI POS Android (status: PENDING)
-      syncOrderToAndroidPOS(orderId, posPayload).then((ok) => {
-        if (ok) {
-          showToast(`✅ Pesanan #${orderId} terkirim ke UTORI POS Kasir & WhatsApp!`, 4000);
-        }
-      });
+      // Pastikan data tersimpan ke Firestore sebelum berpindah ke WhatsApp (maks tunggu 2.5 detik agar popup tetap diizinkan)
+      const syncPromise = syncOrderToAndroidPOS(orderId, posPayload);
+      const syncResult = await Promise.race([
+        syncPromise,
+        new Promise((resolve) => setTimeout(() => resolve({ ok: true, pending: true }), 2500))
+      ]);
+
+      if (syncResult && syncResult.ok === false) {
+        showToast(`⚠️ Gagal kirim ke POS (${syncResult.error}), tetap membuka WhatsApp...`, 4500);
+      } else if (syncResult && !syncResult.pending) {
+        showToast(`✅ Pesanan #${orderId} terkirim ke UTORI POS Kasir & WhatsApp!`, 4000);
+      } else {
+        showToast("Mengirim ke POS Kasir & membuka WhatsApp...", 3500);
+      }
 
       const typeLabels = {
         delivery: "Pesan Antar (Delivery)",
@@ -4479,7 +4511,6 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       const whatsappUrl = `https://wa.me/${CONFIG.whatsappNumber}?text=${encodedMessage}`;
 
       window.open(whatsappUrl, "_blank", "noopener,noreferrer");
-      showToast("Mengirim ke POS Kasir & membuka WhatsApp...", 3500);
     }
 
     function handleAdminButtonClick() {
