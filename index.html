@@ -1278,7 +1278,7 @@
         <div id="posLiveOrderBanner" class="hidden mx-3 sm:mx-4 mt-3 shrink-0 rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-[11px] text-emerald-900 space-y-0.5">
           <div class="flex items-center justify-between font-bold">
             <span class="flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span id="posOrderStatusDot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               <span id="posOrderStatusTitle">Terkirim ke POS Kasir</span>
             </span>
             <span id="posOrderIdBadge" class="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700"></span>
@@ -4195,34 +4195,72 @@
       const titleEl = document.getElementById("posOrderStatusTitle");
       const idEl = document.getElementById("posOrderIdBadge");
       const descEl = document.getElementById("posOrderStatusDesc");
+      const dotEl = document.getElementById("posOrderStatusDot");
       if (!banner || !titleEl || !idEl || !descEl) return;
 
-      banner.classList.remove("hidden", "bg-emerald-50", "border-emerald-200", "text-emerald-900", "bg-amber-50", "border-amber-200", "text-amber-900", "bg-red-50", "border-red-200", "text-red-900");
+      banner.classList.remove(
+        "hidden",
+        "bg-emerald-50", "border-emerald-200", "text-emerald-900",
+        "bg-amber-50", "border-amber-200", "text-amber-900",
+        "bg-red-50", "border-red-200", "text-red-900"
+      );
+      idEl.classList.remove(
+        "border-emerald-200", "text-emerald-700",
+        "border-amber-200", "text-amber-700",
+        "border-red-200", "text-red-700"
+      );
+      if (dotEl) {
+        dotEl.classList.remove("bg-emerald-500", "bg-amber-500", "bg-red-500", "animate-pulse");
+      }
+
       idEl.textContent = orderId ? `#${orderId}` : "";
 
       const upperStatus = String(status || "PENDING").toUpperCase();
+      const applyTheme = (theme, pulse = true) => {
+        if (theme === "red") {
+          banner.classList.add("bg-red-50", "border-red-200", "text-red-900");
+          idEl.classList.add("border-red-200", "text-red-700");
+          if (dotEl) dotEl.classList.add("bg-red-500");
+        } else if (theme === "amber") {
+          banner.classList.add("bg-amber-50", "border-amber-200", "text-amber-900");
+          idEl.classList.add("border-amber-200", "text-amber-700");
+          if (dotEl) dotEl.classList.add("bg-amber-500");
+        } else {
+          banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
+          idEl.classList.add("border-emerald-200", "text-emerald-700");
+          if (dotEl) dotEl.classList.add("bg-emerald-500");
+        }
+        if (dotEl && pulse) {
+          dotEl.classList.add("animate-pulse");
+        }
+      };
+
       if (upperStatus === "SENDING") {
-        banner.classList.add("bg-amber-50", "border-amber-200", "text-amber-900");
+        applyTheme("amber", true);
         titleEl.textContent = "Mengirim ke POS Kasir...";
         descEl.textContent = "Sedang menyinkronkan pesanan ke database UTORI POS.";
       } else if (upperStatus === "ERROR") {
-        banner.classList.add("bg-red-50", "border-red-200", "text-red-900");
+        applyTheme("red", false);
         titleEl.textContent = "Gagal Sinkron ke POS";
         descEl.textContent = extraMsg || "Koneksi Firestore bermasalah. Silakan coba lagi.";
+      } else if (upperStatus.includes("REJECTED") || upperStatus.includes("CANCEL") || upperStatus.includes("DITOLAK") || upperStatus.includes("BATAL")) {
+        applyTheme("red", false);
+        titleEl.textContent = `Status POS: ${upperStatus}`;
+        descEl.textContent = extraMsg || "Pesanan ditolak/dibatalkan oleh kasir UTORI POS.";
       } else if (upperStatus === "PENDING") {
-        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
+        applyTheme("emerald", true);
         titleEl.textContent = "Terkirim ke POS Kasir";
         descEl.textContent = "Pesanan otomatis masuk ke layar kasir UTORI POS (Menunggu konfirmasi kasir).";
       } else if (upperStatus === "ACCEPTED" || upperStatus === "PROCESSING" || upperStatus === "DIPROSES" || upperStatus === "COOKING") {
-        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
+        applyTheme("emerald", true);
         titleEl.textContent = "Diterima & Sedang Diproses";
         descEl.textContent = `Kasir POS telah menerima pesanan Anda (Status: ${upperStatus}).`;
       } else if (upperStatus === "COMPLETED" || upperStatus === "DONE" || upperStatus === "SELESAI" || upperStatus === "PAID") {
-        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
+        applyTheme("emerald", false);
         titleEl.textContent = "Pesanan Selesai / Siap!";
         descEl.textContent = `Pesanan Anda telah ditandai ${upperStatus} oleh kasir POS.`;
       } else {
-        banner.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-900");
+        applyTheme("emerald", true);
         titleEl.textContent = `Status POS: ${upperStatus}`;
         descEl.textContent = `Pembaruan real-time dari aplikasi UTORI POS.`;
       }
