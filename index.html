@@ -74,7 +74,12 @@
             const item = cats[i];
             if (!item || typeof item !== "object") continue;
             const docId = sanitizeDocId(item.id, "cat", i);
-            await setDoc(doc(db, 'categories', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
+            await setDoc(doc(db, 'categories', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }), { merge: true });
+          }
+          // Sinkronkan juga daftar nama kategori ke settings/categories untuk CatalogPreferences Android POS
+          const catNames = cats.map(c => (c && c.name ? String(c.name).trim() : "")).filter(Boolean);
+          if (catNames.length > 0) {
+            await setDoc(doc(db, 'settings', 'categories'), cleanFirestorePayload({ list: catNames, updatedAt: Date.now() }), { merge: true });
           }
         } catch(e) { console.error("Error syncCategoriesToFirestore:", e); }
       },
@@ -85,7 +90,7 @@
             const item = prods[i];
             if (!item || typeof item !== "object") continue;
             const docId = sanitizeDocId(item.id, "prod", i);
-            await setDoc(doc(db, 'products', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
+            await setDoc(doc(db, 'products', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }), { merge: true });
           }
         } catch(e) { console.error("Error syncProductsToFirestore:", e); }
       },
@@ -93,7 +98,7 @@
         try {
           if (!p || typeof p !== "object") return;
           const docId = sanitizeDocId(p.id, "prod", 0);
-          await setDoc(doc(db, 'products', docId), cleanFirestorePayload({ ...p, id: docId }), { merge: true });
+          await setDoc(doc(db, 'products', docId), cleanFirestorePayload({ ...p, id: docId, updatedAt: p.updatedAt || Date.now() }), { merge: true });
         } catch(e) { console.error("Error syncSingleProductToFirestore:", e); }
       },
       async deleteProductFromFirestore(id) {
@@ -225,7 +230,7 @@
         }
       }, (e) => console.error("Config onSnapshot error:", e));
 
-      // Listen Categories
+      // Listen Categories (koleksi categories + settings/categories dari Android CatalogPreferences)
       onSnapshot(collection(db, 'categories'), (snap) => {
         if (!snap.empty) {
           const list = [];
@@ -239,6 +244,15 @@
           window.FirestoreSync.syncCategoriesToFirestore(window.CATEGORIES);
         }
       }, (e) => console.error("Categories onSnapshot error:", e));
+
+      onSnapshot(doc(db, 'settings', 'categories'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data && Array.isArray(data.list) && window.onFirestoreAndroidCategoriesList) {
+            window.onFirestoreAndroidCategoriesList(data.list);
+          }
+        }
+      }, (e) => console.error("Android settings/categories listener error:", e));
 
       // Listen Products
       onSnapshot(collection(db, 'products'), (snap) => {
@@ -1666,6 +1680,11 @@
               <input type="number" id="newMenuPrice" placeholder="Contoh: 58000" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
             </div>
 
+            <div>
+              <label class="block text-stone-700 font-bold mb-1">Stok Awal (Sinkron ke POS) *</label>
+              <input type="number" id="newMenuStock" value="10" min="0" placeholder="Contoh: 10" class="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none">
+            </div>
+
             <!-- Pengaturan Foto Menu: PRIORITAS UPLOAD GAMBAR LOKAL -->
             <div class="sm:col-span-2 bg-white p-3 rounded-xl border border-stone-200 space-y-2">
               <div class="flex items-center justify-between">
@@ -1757,7 +1776,7 @@
                 <span class="text-[10px] font-normal text-stone-500">Bisa diubah lagi nanti</span>
               </label>
 
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-[11px]">
                 <label class="p-2 border border-stone-200 rounded-lg flex items-start gap-2 cursor-pointer hover:bg-stone-50">
                   <input type="radio" name="varTemplateChoice" value="sushi" checked class="mt-0.5 text-jp-crimson">
                   <div>
@@ -1779,6 +1798,14 @@
                   <div>
                     <span class="font-bold text-stone-900 block">Template Donburi</span>
                     <span class="text-stone-500 text-[10px]">Pilihan Telur & Porsi Nasi</span>
+                  </div>
+                </label>
+
+                <label class="p-2 border border-stone-200 rounded-lg flex items-start gap-2 cursor-pointer hover:bg-stone-50">
+                  <input type="radio" name="varTemplateChoice" value="none" class="mt-0.5 text-jp-crimson">
+                  <div>
+                    <span class="font-bold text-stone-900 block">Tanpa Variasi</span>
+                    <span class="text-stone-500 text-[10px]">Langsung pesan 1 varian standar (Reguler)</span>
                   </div>
                 </label>
               </div>
@@ -3225,6 +3252,104 @@
       }
     }
 
+    const DEFAULT_FALLBACK_FOOD_IMG = "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80";
+
+    function resolveProductImage(item) {
+      if (!item || typeof item !== "object") return DEFAULT_FALLBACK_FOOD_IMG;
+      const candidates = [item.image, item.imageUri];
+      for (const raw of candidates) {
+        if (typeof raw === "string") {
+          const s = raw.trim();
+          if (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("data:image/")) {
+            return s;
+          }
+        }
+      }
+      return DEFAULT_FALLBACK_FOOD_IMG;
+    }
+
+    function resolveCategoryObj(catValue) {
+      const val = String(catValue || "").trim();
+      if (!val) return null;
+      const lower = val.toLowerCase();
+      return CATEGORIES.find(c => c.id === val || (c.name && c.name.trim().toLowerCase() === lower)) || null;
+    }
+
+    function resolveCategoryLabel(catValue) {
+      const found = resolveCategoryObj(catValue);
+      return found ? found.name : (String(catValue || "").trim() || "Menu");
+    }
+
+    function buildModifierGroupsFromOptions(options) {
+      if (!Array.isArray(options)) return [];
+      return options
+        .filter(g => g && g.name && Array.isArray(g.choices) && g.choices.length > 0)
+        .map(g => ({
+          name: String(g.name).trim(),
+          selectionType: g.selectionType || "single",
+          required: g.required !== false,
+          options: g.choices.map(choiceRaw => {
+            const choiceStr = String(choiceRaw || "").trim();
+            const match = choiceStr.match(/\(\s*\+?Rp\s*([\d.]+)\s*\)/i);
+            const extraPrice = match ? (Number(match[1].replace(/\./g, "")) || 0) : 0;
+            const cleanChoiceName = choiceStr.replace(/\(\s*\+?Rp\s*[\d.]+\s*\)/i, "").trim() || choiceStr;
+            return {
+              name: cleanChoiceName,
+              price: extraPrice
+            };
+          })
+        }));
+    }
+
+    function buildOptionsFromModifierGroups(modifierGroups) {
+      if (!Array.isArray(modifierGroups)) return [];
+      return modifierGroups
+        .filter(g => g && g.name && Array.isArray(g.options) && g.options.length > 0)
+        .map(g => ({
+          name: String(g.name).trim(),
+          choices: g.options.map(opt => {
+            const optName = String(opt?.name || "Opsi").trim();
+            const optPrice = Number(opt?.price) || 0;
+            if (optPrice > 0) {
+              return `${optName} (+Rp ${optPrice.toLocaleString("id-ID")})`;
+            }
+            return optName;
+          })
+        }));
+    }
+
+    function normalizeProductRecord(rawProd, idx = 0) {
+      const p = { ...(rawProd || {}) };
+      p.id = normalizeSafeId(p.id, "prod", idx);
+      p.name = String(p.name || "Menu Tanpa Nama");
+      p.description = typeof p.description === "string" ? p.description : "";
+      p.price = Number(p.price) || 0;
+
+      if (p.stock !== undefined && p.stock !== null && p.stock !== "") {
+        p.stock = Math.max(0, Number(p.stock) || 0);
+      }
+
+      // Sinkronkan 2 arah antara options (Website) dan modifierGroups (Android POS)
+      if (Array.isArray(p.modifierGroups) && p.modifierGroups.length > 0) {
+        p.options = buildOptionsFromModifierGroups(p.modifierGroups);
+      } else if (Array.isArray(p.options) && p.options.length > 0) {
+        p.modifierGroups = buildModifierGroupsFromOptions(p.options);
+      } else {
+        p.options = [];
+        p.modifierGroups = [];
+      }
+
+      p.hasVariations = p.options.length > 0;
+      p.variations = p.hasVariations ? p.options.map(o => o.name).join(", ") : "Tanpa Varian";
+
+      const resolvedImg = resolveProductImage(p);
+      if (typeof p.image !== "string" || (!p.image.startsWith("http") && !p.image.startsWith("data:image/"))) {
+        p.image = resolvedImg;
+      }
+
+      return p;
+    }
+
     function renderProducts() {
       const grid = document.getElementById("productGrid");
       const emptyState = document.getElementById("emptyState");
@@ -3233,22 +3358,27 @@
 
       if (!grid) return;
 
+      const activeCatObj = activeCategory === "semua" ? null : resolveCategoryObj(activeCategory);
+
       const filtered = PRODUCTS.filter(item => {
-        const matchCategory = (activeCategory === "semua" || item.category === activeCategory);
+        const itemCatObj = resolveCategoryObj(item.category);
+        const matchCategory = activeCategory === "semua" ||
+          item.category === activeCategory ||
+          (itemCatObj && activeCatObj && (itemCatObj.id === activeCatObj.id || itemCatObj.name.toLowerCase() === activeCatObj.name.toLowerCase())) ||
+          (activeCatObj && String(item.category || "").trim().toLowerCase() === activeCatObj.name.trim().toLowerCase());
+
         const q = searchQuery.trim().toLowerCase();
-        const catObj = CATEGORIES.find(c => c.id === item.category);
-        const catLabel = catObj ? catObj.name : "";
+        const catLabel = resolveCategoryLabel(item.category);
         const matchSearch = q === "" || 
-          item.name.toLowerCase().includes(q) || 
-          item.description.toLowerCase().includes(q) ||
+          (item.name || "").toLowerCase().includes(q) || 
+          (item.description || "").toLowerCase().includes(q) ||
           catLabel.toLowerCase().includes(q);
         return matchCategory && matchSearch;
       });
 
       if (searchQuery.trim() !== "" || activeCategory !== "semua") {
         filterStatus.classList.remove("hidden");
-        const catObj = CATEGORIES.find(c => c.id === activeCategory);
-        const catName = activeCategory === "semua" ? "Semua Kategori" : (catObj ? catObj.name : activeCategory);
+        const catName = activeCategory === "semua" ? "Semua Kategori" : (activeCatObj ? activeCatObj.name : activeCategory);
         const searchInfo = searchQuery.trim() ? `"${searchQuery}"` : "";
         filterStatusText.textContent = `Menampilkan ${filtered.length} menu untuk ${catName} ${searchInfo ? `dengan kata kunci ${searchInfo}` : ''}`;
       } else {
@@ -3264,8 +3394,9 @@
       emptyState.classList.add("hidden");
 
       grid.innerHTML = filtered.map(item => {
-        const catObj = CATEGORIES.find(c => c.id === item.category);
-        const catLabel = catObj ? catObj.name : "Menu";
+        const catLabel = resolveCategoryLabel(item.category);
+        const imgUrl = resolveProductImage(item);
+        const isOutOfStock = typeof item.stock === "number" && item.stock <= 0;
         
         const inCartQty = cart
           .filter(ci => ci.product.id === item.id)
@@ -3274,15 +3405,15 @@
         const hasOptions = item.options && item.options.length > 0;
 
         return `
-          <div class="bg-white rounded-xl border border-stone-200/90 shadow-2xs hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col overflow-hidden group">
+          <div class="bg-white rounded-xl border border-stone-200/90 shadow-2xs hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col overflow-hidden group ${isOutOfStock ? 'opacity-75' : ''}">
             
-            <div class="relative w-full h-36 sm:h-44 bg-stone-100 overflow-hidden cursor-pointer" onclick="handleProductClick('${item.id}')">
+            <div class="relative w-full h-36 sm:h-44 bg-stone-100 overflow-hidden ${isOutOfStock ? 'cursor-not-allowed' : 'cursor-pointer'}" onclick="${isOutOfStock ? '' : `handleProductClick('${item.id}')`}">
               <img 
-                src="${item.image}" 
+                src="${imgUrl}" 
                 alt="${item.name}" 
-                class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ${isOutOfStock ? 'grayscale' : ''}"
                 loading="lazy"
-                onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80';"
+                onerror="this.onerror=null; this.src='${DEFAULT_FALLBACK_FOOD_IMG}';"
               />
               <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-30 group-hover:opacity-50 transition-opacity"></div>
               
@@ -3290,13 +3421,17 @@
                 ${catLabel}
               </span>
 
-              ${inCartQty > 0 ? `
+              ${isOutOfStock ? `
+                <span class="absolute top-2 right-2 bg-stone-900 text-rose-300 border border-rose-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">
+                  Stok Habis
+                </span>
+              ` : (inCartQty > 0 ? `
                 <span class="absolute top-2 right-2 bg-jp-crimson text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full shadow-sm font-mono">
                   ${inCartQty}x dipilih
                 </span>
-              ` : ''}
+              ` : '')}
 
-              ${hasOptions ? `
+              ${hasOptions && !isOutOfStock ? `
                 <span class="absolute bottom-2 left-2 bg-white/95 text-jp-crimson text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1 backdrop-blur-xs">
                   <span class="w-1.5 h-1.5 rounded-full bg-jp-crimson"></span>
                   <span>Ada Pilihan Variasi</span>
@@ -3306,18 +3441,23 @@
 
             <div class="p-3 sm:p-3.5 flex-1 flex flex-col justify-between">
               <div>
-                <div class="flex items-center gap-1 mb-1 text-[11px]">
-                  <svg class="w-3.5 h-3.5 fill-amber-400 text-amber-400" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
-                  <span class="font-bold text-stone-900">${item.rating || 4.9}</span>
-                  <span class="text-stone-400 text-[10px]">(${item.reviewsCount || 100})</span>
+                <div class="flex items-center justify-between gap-1 mb-1 text-[11px]">
+                  <div class="flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5 fill-amber-400 text-amber-400" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                    <span class="font-bold text-stone-900">${item.rating || 4.9}</span>
+                    <span class="text-stone-400 text-[10px]">(${item.reviewsCount || 100})</span>
+                  </div>
+                  ${typeof item.stock === 'number' && item.stock > 0 && item.stock <= 5 ? `
+                    <span class="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">Sisa ${item.stock}</span>
+                  ` : ''}
                 </div>
 
-                <h3 onclick="handleProductClick('${item.id}')" class="font-display font-bold text-xs sm:text-sm text-stone-900 group-hover:text-jp-crimson transition-colors line-clamp-1 cursor-pointer">
+                <h3 onclick="${isOutOfStock ? '' : `handleProductClick('${item.id}')`}" class="font-display font-bold text-xs sm:text-sm text-stone-900 group-hover:text-jp-crimson transition-colors line-clamp-1 ${isOutOfStock ? '' : 'cursor-pointer'}">
                   ${item.name}
                 </h3>
 
                 <p class="text-stone-500 text-[11px] leading-snug mt-1 line-clamp-2">
-                  ${item.description}
+                  ${item.description || `Menu ${catLabel} pilihan dari dapur Utori.`}
                 </p>
 
                 ${hasOptions ? `
@@ -3333,12 +3473,12 @@
                 </span>
 
                 <button 
-                  onclick="handleProductClick('${item.id}')" 
-                  class="inline-flex items-center gap-1 px-2.5 py-1.5 ${hasOptions ? 'bg-amber-600 hover:bg-amber-700' : 'bg-jp-sumi hover:bg-jp-crimson'} text-white text-[11px] font-bold rounded-lg transition-colors active:scale-95 cursor-pointer"
-                  title="Pilih ${item.name}"
+                  ${isOutOfStock ? 'disabled' : `onclick="handleProductClick('${item.id}')"`} 
+                  class="inline-flex items-center gap-1 px-2.5 py-1.5 ${isOutOfStock ? 'bg-stone-300 text-stone-500 cursor-not-allowed' : (hasOptions ? 'bg-amber-600 hover:bg-amber-700 text-white cursor-pointer active:scale-95' : 'bg-jp-sumi hover:bg-jp-crimson text-white cursor-pointer active:scale-95')} text-[11px] font-bold rounded-lg transition-colors"
+                  title="${isOutOfStock ? 'Stok habis' : `Pilih ${item.name}`}"
                 >
-                  <i data-lucide="${hasOptions ? 'sliders' : 'plus'}" class="w-3 h-3"></i>
-                  <span>${hasOptions ? 'Pilih Variasi' : 'Pesan'}</span>
+                  <i data-lucide="${isOutOfStock ? 'ban' : (hasOptions ? 'sliders' : 'plus')}" class="w-3 h-3"></i>
+                  <span>${isOutOfStock ? 'Habis' : (hasOptions ? 'Pilih Variasi' : 'Pesan')}</span>
                 </button>
               </div>
 
@@ -3425,7 +3565,7 @@
 
       if (!backdrop || !panel) return;
 
-      if (img) img.src = product.image;
+      if (img) img.src = resolveProductImage(product);
       if (title) title.textContent = product.name;
       if (basePrice) basePrice.textContent = currencyFormatter.format(product.price);
       if (notesInput) notesInput.value = "";
@@ -3435,8 +3575,7 @@
       }
 
       if (catEl) {
-        const catObj = CATEGORIES.find(c => c.id === product.category);
-        catEl.textContent = catObj ? catObj.name : "Menu Pilihan";
+        catEl.textContent = resolveCategoryLabel(product.category);
       }
       if (ratingEl) {
         ratingEl.innerHTML = `â˜… ${product.rating || 4.9} <span class="text-stone-300 font-normal">(${product.reviewsCount || 100}+ ulasan)</span>`;
@@ -4847,9 +4986,22 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
     function updateCategoryName(id, newName) {
       const cat = CATEGORIES.find(c => c.id === id);
       if (!cat) return;
-      cat.name = newName.trim();
+      const cleanName = newName.trim();
+      if (!cleanName) return;
+      const oldName = cat.name;
+      cat.name = cleanName;
+      let prodChanged = false;
+      PRODUCTS.forEach(p => {
+        if (String(p.category || "").toLowerCase() === oldName.toLowerCase() || p.category === id) {
+          p.category = cleanName;
+          p.updatedAt = Date.now();
+          prodChanged = true;
+        }
+      });
       saveAdminCategories();
+      if (prodChanged) saveAdminProducts();
       renderCategoryTabs();
+      renderAdminMenuList();
       renderProducts();
       showToast("Nama kategori diperbarui!");
     }
@@ -4861,9 +5013,12 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
 
       if (confirm(`Hapus kategori "${cat.name}"? Menu dalam kategori ini akan dipindahkan ke kategori pertama.`)) {
         CATEGORIES = CATEGORIES.filter(c => c.id !== id);
-        const fallbackCat = CATEGORIES[0].id;
+        const fallbackCat = CATEGORIES[0].name;
         PRODUCTS.forEach(p => {
-          if (p.category === id) p.category = fallbackCat;
+          if (p.category === id || String(p.category || "").toLowerCase() === cat.name.toLowerCase()) {
+            p.category = fallbackCat;
+            p.updatedAt = Date.now();
+          }
         });
 
         saveAdminCategories();
@@ -4873,6 +5028,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         }
         renderCategoryTabs();
         renderAdminCategoryList();
+        renderAdminMenuList();
         renderProducts();
         showToast(`Kategori "${cat.name}" berhasil dihapus.`);
       }
@@ -4888,10 +5044,9 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       let filteredItems = PRODUCTS;
       if (query) {
         filteredItems = PRODUCTS.filter(item => {
-          const catObj = CATEGORIES.find(c => c.id === item.category);
-          const catName = catObj ? catObj.name.toLowerCase() : "";
-          return item.name.toLowerCase().includes(query) || 
-                 item.category.toLowerCase().includes(query) ||
+          const catName = resolveCategoryLabel(item.category).toLowerCase();
+          return (item.name || "").toLowerCase().includes(query) || 
+                 String(item.category || "").toLowerCase().includes(query) ||
                  catName.includes(query);
         });
       }
@@ -4913,8 +5068,10 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       }
 
       container.innerHTML = filteredItems.map((item, index) => {
-        const catObj = CATEGORIES.find(c => c.id === item.category);
-        const catLabel = catObj ? catObj.name : item.category;
+        const catObj = resolveCategoryObj(item.category);
+        const catLabel = catObj ? catObj.name : (item.category || "Umum");
+        const imgUrl = resolveProductImage(item);
+        const stockVal = (typeof item.stock === "number" && !Number.isNaN(item.stock)) ? item.stock : 10;
         const optCount = (item.options && Array.isArray(item.options)) ? item.options.length : 0;
 
         return `
@@ -4949,10 +5106,10 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
                 
                 <div class="relative group/thumb shrink-0">
                   <img 
-                    src="${item.image}" 
+                    src="${imgUrl}" 
                     alt="${item.name}" 
                     class="w-9 h-9 rounded-md object-cover border border-stone-200 shadow-2xs" 
-                    onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80';"
+                    onerror="this.onerror=null; this.src='${DEFAULT_FALLBACK_FOOD_IMG}';"
                   >
                   <label 
                     class="absolute inset-0 bg-stone-950/75 hover:bg-stone-950/90 rounded-md flex items-center justify-center text-white opacity-0 group-hover/thumb:opacity-100 transition cursor-pointer p-0.5" 
@@ -4966,7 +5123,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
                 <div class="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                   <input 
                     type="text" 
-                    value="${item.name}" 
+                    value="${(item.name || '').replace(/"/g, '&quot;')}" 
                     onchange="updateMenuItemProp('${item.id}', 'name', this.value)" 
                     class="font-bold text-stone-900 bg-stone-50/60 hover:bg-white focus:bg-white border border-stone-200 rounded px-2 py-0.5 text-xs w-full sm:max-w-[200px] md:max-w-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none truncate"
                     title="Klik untuk ubah nama menu"
@@ -4977,14 +5134,16 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
                     class="bg-stone-100 hover:bg-white border border-stone-200 rounded px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 shrink-0 w-fit focus:outline-none"
                     title="Pilih kategori menu"
                   >
-                    ${CATEGORIES.map(c => `
-                      <option value="${c.id}" ${c.id === item.category ? 'selected' : ''}>${c.name}</option>
-                    `).join("")}
+                    ${CATEGORIES.map(c => {
+                      const isSel = c.id === item.category || (c.name && c.name.trim().toLowerCase() === String(item.category || '').trim().toLowerCase());
+                      return `<option value="${c.name}" ${isSel ? 'selected' : ''}>${c.name}</option>`;
+                    }).join("")}
+                    ${!catObj && item.category ? `<option value="${item.category}" selected>${item.category}</option>` : ''}
                   </select>
                 </div>
               </div>
 
-              <div class="flex items-center gap-1.5 shrink-0 ml-auto sm:ml-0">
+              <div class="flex items-center gap-1.5 shrink-0 ml-auto sm:ml-0 flex-wrap justify-end">
                 
                 <button 
                   type="button" 
@@ -5008,12 +5167,23 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
 
                 <label 
                   class="px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-md text-[10px] font-bold cursor-pointer flex items-center gap-1 transition" 
-                  title="Upload foto ke Firebase Storage"
+                  title="Upload foto ke Cloud Firestore"
                 >
                   <i data-lucide="upload" class="w-2.5 h-2.5 text-emerald-600"></i>
                   <span class="hidden sm:inline">Foto</span>
                   <input type="file" accept="image/*" class="hidden" onchange="handleItemLocalPhotoUpload('${item.id}', this)">
                 </label>
+
+                <div class="flex items-center gap-0.5 bg-stone-50 border border-stone-200 rounded-md px-1.5 py-0.5" title="Stok menu (sinkron dengan POS Android)">
+                  <span class="text-[9px] font-bold text-stone-400">Stok</span>
+                  <input 
+                    type="number" 
+                    min="0"
+                    value="${stockVal}" 
+                    onchange="updateMenuItemProp('${item.id}', 'stock', this.value)" 
+                    class="font-mono font-bold text-xs ${stockVal <= 0 ? 'text-rose-600' : 'text-emerald-700'} bg-transparent w-10 text-right focus:outline-none"
+                  >
+                </div>
 
                 <div class="flex items-center gap-0.5 bg-stone-50 border border-stone-200 rounded-md px-1.5 py-0.5">
                   <span class="text-[9px] font-bold text-stone-400">Rp</span>
@@ -6530,8 +6700,8 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
 
       if (!backdrop || !panel) return;
 
-      img.src = product.image;
-      name.textContent = product.name;
+      if (img) img.src = resolveProductImage(product);
+      if (name) name.textContent = product.name;
 
       renderAdminVarEditGroupsUI();
 
@@ -6647,12 +6817,21 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         }));
 
       adminEditingProduct.options = cleanOptions;
+      adminEditingProduct.modifierGroups = buildModifierGroupsFromOptions(cleanOptions);
+      adminEditingProduct.hasVariations = cleanOptions.length > 0;
+      adminEditingProduct.variations = cleanOptions.length > 0
+        ? cleanOptions.map(o => o.name).join(", ")
+        : "Tanpa Varian";
+      adminEditingProduct.updatedAt = Date.now();
       
-      saveAdminProducts();
+      saveAdminProductsLocalOnly();
+      if (window.FirestoreSync && window.FirestoreSync.syncSingleProductToFirestore) {
+        window.FirestoreSync.syncSingleProductToFirestore(adminEditingProduct);
+      }
       renderAdminMenuList();
       renderProducts();
       closeAdminVariationEditor();
-      showToast(`Variasi menu berhasil disimpan!`);
+      showToast(`Variasi menu berhasil disimpan & disinkronkan ke POS!`);
     }
 
     function closeAdminVariationEditor() {
@@ -6677,20 +6856,25 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
     function syncAllMenuVariations() {
       PRODUCTS.forEach(p => {
         if (!p.options || p.options.length === 0) {
-          if (p.category === "sushi" || p.name.toLowerCase().includes("roll")) {
+          const catLower = resolveCategoryLabel(p.category).toLowerCase();
+          if (catLower.includes("sushi") || catLower.includes("roll") || (p.name || "").toLowerCase().includes("roll")) {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.sushi));
-          } else if (p.category === "minuman") {
+          } else if (catLower.includes("minum") || catLower.includes("drink")) {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.minuman));
           } else {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.donburi));
           }
+          p.modifierGroups = buildModifierGroupsFromOptions(p.options);
+          p.hasVariations = p.options.length > 0;
+          p.variations = p.options.map(o => o.name).join(", ");
+          p.updatedAt = Date.now();
         }
       });
 
       saveAdminProducts();
       renderAdminMenuList();
       renderProducts();
-      showToast("Seluruh menu dilengkapi opsi variasi!");
+      showToast("Seluruh menu dilengkapi opsi variasi & disinkronkan!");
     }
 
     function updateMenuItemProp(id, prop, val) {
@@ -6698,17 +6882,25 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       if (!item) return;
 
       if (prop === "price") {
-        item.price = Number(val) || 0;
+        item.price = Math.max(0, Number(val) || 0);
+      } else if (prop === "stock") {
+        item.stock = Math.max(0, parseInt(val, 10) || 0);
+      } else if (prop === "category") {
+        item.category = resolveCategoryLabel(val);
       } else {
         item[prop] = val;
       }
+      item.updatedAt = Date.now();
 
-      saveAdminProducts();
+      saveAdminProductsLocalOnly();
+      if (window.FirestoreSync && window.FirestoreSync.syncSingleProductToFirestore) {
+        window.FirestoreSync.syncSingleProductToFirestore(item);
+      }
       renderProducts();
       renderHeroSlideshow();
       renderAdminSlideshowSettings();
       updateCartUI();
-      showToast("Perubahan menu disimpan!");
+      showToast("Perubahan menu disimpan & disinkronkan ke POS!");
     }
 
     let pendingDeleteMenuId = null;
@@ -6827,17 +7019,17 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       if (heroSlideshowIndex < 0) heroSlideshowIndex = slides.length - 1;
 
       const item = slides[heroSlideshowIndex];
-      const catObj = CATEGORIES.find(c => c.id === item.category);
-      const catName = catObj ? catObj.name : "Menu Pilihan";
+      const catName = resolveCategoryLabel(item.category);
+      const imgUrl = resolveProductImage(item);
 
       card.innerHTML = `
         <img 
-          src="${item.image}" 
+          src="${imgUrl}" 
           alt="${item.name}" 
           class="w-[600px] max-w-full h-[500px] object-cover transition-transform duration-700 ease-out"
           style="width: 600px; height: 500px;"
           loading="eager"
-          onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80';"
+          onerror="this.onerror=null; this.src='${DEFAULT_FALLBACK_FOOD_IMG}';"
         />
         <div class="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-black/25 pointer-events-none"></div>
 
@@ -7035,9 +7227,11 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         const compressedDataUrl = await compressImageFile(file);
 
         item.image = compressedDataUrl;
+        item.imageUri = compressedDataUrl;
+        item.updatedAt = Date.now();
         
         // Simpan ke storage lokal & langsung kirim ke Cloud Firestore
-        saveAdminProducts();
+        saveAdminProductsLocalOnly();
         if (window.FirestoreSync && window.FirestoreSync.syncSingleProductToFirestore) {
           await window.FirestoreSync.syncSingleProductToFirestore(item);
         }
@@ -7080,21 +7274,35 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       }
     }
 
+    function nextNumericProductId() {
+      let maxId = 0;
+      PRODUCTS.forEach(p => {
+        const n = parseInt(String(p.id || ""), 10);
+        if (!Number.isNaN(n) && String(n) === String(p.id).trim() && n > maxId && n < 2000000000) {
+          maxId = n;
+        }
+      });
+      return String(maxId + 1);
+    }
+
     function saveNewMenu() {
       const name = document.getElementById("newMenuName").value.trim();
-      const cat = document.getElementById("newMenuCategory").value;
+      const catRaw = document.getElementById("newMenuCategory").value;
+      const catName = resolveCategoryLabel(catRaw);
       const price = Number(document.getElementById("newMenuPrice").value) || 0;
+      const rawStock = document.getElementById("newMenuStock")?.value;
+      const stock = (rawStock !== undefined && rawStock !== "") ? Math.max(0, parseInt(rawStock, 10) || 0) : 10;
       const desc = document.getElementById("newMenuDesc").value.trim();
       let image = document.getElementById("newMenuImage").value.trim();
       const selectedTemplate = document.querySelector('input[name="varTemplateChoice"]:checked')?.value || "sushi";
 
-      if (!name || price <= 0 || !desc) {
-        alert("Mohon lengkapi Nama, Harga (angka), dan Deskripsi menu!");
+      if (!name || price <= 0) {
+        showToast("âš ï¸ Mohon lengkapi Nama dan Harga menu!", 3500);
         return;
       }
 
       if (!image) {
-        image = "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?auto=format&fit=crop&w=600&q=80";
+        image = DEFAULT_FALLBACK_FOOD_IMG;
       }
 
       let options = [];
@@ -7106,22 +7314,30 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.donburi));
       }
 
-      const newId = "custom-" + Date.now();
+      const modifierGroups = buildModifierGroupsFromOptions(options);
+      const newId = nextNumericProductId();
       const newProduct = {
         id: newId,
         name: name,
-        category: cat,
+        category: catName,
         price: price,
+        stock: stock,
         rating: 5.0,
         reviewsCount: 1,
-        description: desc,
+        description: desc || `Menu ${catName} pilihan dari dapur Utori.`,
         image: image,
+        imageUri: image,
+        imageIcon: "ic_fastfood",
         featuredInHero: false,
-        options: options
+        hasVariations: options.length > 0,
+        variations: options.length > 0 ? options.map(o => o.name).join(", ") : "Tanpa Varian",
+        options: options,
+        modifierGroups: modifierGroups,
+        updatedAt: Date.now()
       };
 
       PRODUCTS.unshift(newProduct);
-      saveAdminProducts();
+      saveAdminProductsLocalOnly();
       if (window.FirestoreSync && window.FirestoreSync.syncSingleProductToFirestore) {
         window.FirestoreSync.syncSingleProductToFirestore(newProduct);
       }
@@ -7132,6 +7348,8 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
 
       document.getElementById("newMenuName").value = "";
       document.getElementById("newMenuPrice").value = "";
+      const stockInput = document.getElementById("newMenuStock");
+      if (stockInput) stockInput.value = "10";
       document.getElementById("newMenuDesc").value = "";
       document.getElementById("newMenuImage").value = "";
       const fileInput = document.getElementById("newMenuFileInput");
@@ -7140,7 +7358,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       if (badge) badge.textContent = "Foto Default";
       toggleAddMenuForm();
 
-      showToast(`Menu "${name}" berhasil ditambahkan & tersimpan ke Cloud Firestore!`);
+      showToast(`Menu "${name}" (#${newId}) berhasil ditambahkan & disinkronkan ke POS!`);
     }
 
     function resetToDefaultProducts() {
@@ -7241,6 +7459,13 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       } catch (e) {}
     }
 
+    function saveAdminProductsLocalOnly() {
+      try {
+        window.PRODUCTS = PRODUCTS;
+        localStorage.setItem("shinzan_admin_products", JSON.stringify(PRODUCTS));
+      } catch (e) {}
+    }
+
     function saveAdminProducts() {
       try {
         window.PRODUCTS = PRODUCTS;
@@ -7262,56 +7487,14 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         }
       } catch (e) {}
 
-      let needsSave = false;
-
-      PRODUCTS.forEach((p, idx) => {
-        const safeId = normalizeSafeId(p.id, "jp", idx);
-        if (p.id !== safeId) {
-          p.id = safeId;
-          needsSave = true;
-        }
-      });
-
-      const yakinikuItem = PRODUCTS.find(p => p.id === "jp-2" || p.name === "Truffle Gyudon Beef Bowl");
-      if (yakinikuItem) {
-        if (yakinikuItem.name === "Truffle Gyudon Beef Bowl") {
-          yakinikuItem.name = "Yakiniku Don";
-          needsSave = true;
-        }
-      }
-
-      PRODUCTS.forEach(p => {
-        if (!p.options || !Array.isArray(p.options) || p.options.length === 0) {
-          const defaultMatch = DEFAULT_PRODUCTS.find(dp => dp.id === p.id);
-          const itemName = (p.name || "").toLowerCase();
-          if (defaultMatch && defaultMatch.options) {
-            p.options = JSON.parse(JSON.stringify(defaultMatch.options));
-          } else if (p.category === "sushi" || itemName.includes("roll")) {
-            p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.sushi));
-          } else if (p.category === "minuman") {
-            p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.minuman));
-          } else {
-            p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.donburi));
-          }
-          needsSave = true;
-        }
-      });
-
+      PRODUCTS = PRODUCTS.map((p, idx) => normalizeProductRecord(p, idx));
       const anyFeatured = PRODUCTS.some(p => p.featuredInHero === true);
       if (!anyFeatured) {
         PRODUCTS.forEach((p, idx) => {
-          if (p.id === 'jp-2' || p.id === 'jp-1' || p.id === 'jp-5' || p.id === 'jp-6' || idx < 4) {
-            p.featuredInHero = true;
-          } else {
-            p.featuredInHero = false;
-          }
+          p.featuredInHero = (p.id === 'jp-2' || p.id === 'jp-1' || p.id === 'jp-5' || p.id === 'jp-6' || idx < 4);
         });
-        needsSave = true;
       }
-
-      if (needsSave) {
-        saveAdminProducts();
-      }
+      saveAdminProductsLocalOnly();
     }
 
     function saveAdminExtras() {
@@ -7387,20 +7570,57 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       applyStoreConfigToUI();
     };
 
+    function ensureCategoryNamesExist(catNames) {
+      if (!Array.isArray(catNames) || catNames.length === 0) return false;
+      let changed = false;
+      catNames.forEach((rawName, idx) => {
+        const cleanName = String(rawName || "").trim();
+        if (!cleanName) return;
+        const exists = CATEGORIES.some(c =>
+          c.id === cleanName || (c.name && c.name.trim().toLowerCase() === cleanName.toLowerCase())
+        );
+        if (!exists) {
+          const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+          CATEGORIES.push({ id: slug || `cat_${Date.now()}_${idx}`, name: cleanName });
+          changed = true;
+        }
+      });
+      if (changed) {
+        window.CATEGORIES = CATEGORIES;
+        try { localStorage.setItem("shinzan_admin_categories", JSON.stringify(CATEGORIES)); } catch (e) {}
+      }
+      return changed;
+    }
+
     window.onFirestoreCategoriesUpdate = function(newCategories) {
       if (!Array.isArray(newCategories) || newCategories.length === 0) return;
       CATEGORIES = newCategories;
       window.CATEGORIES = CATEGORIES;
+      const productCats = PRODUCTS.map(p => p.category).filter(c => c && !String(c).startsWith("cat_"));
+      ensureCategoryNamesExist(productCats);
       try { localStorage.setItem("shinzan_admin_categories", JSON.stringify(CATEGORIES)); } catch (e) {}
       renderCategoryTabs();
       renderAdminCategoryList();
       renderProducts();
     };
 
+    window.onFirestoreAndroidCategoriesList = function(catNameList) {
+      if (ensureCategoryNamesExist(catNameList)) {
+        renderCategoryTabs();
+        renderAdminCategoryList();
+        renderProducts();
+      }
+    };
+
     window.onFirestoreProductsUpdate = function(newProducts) {
       if (!Array.isArray(newProducts) || newProducts.length === 0) return;
-      PRODUCTS = newProducts;
+      PRODUCTS = newProducts.map((p, idx) => normalizeProductRecord(p, idx));
       window.PRODUCTS = PRODUCTS;
+      const productCats = PRODUCTS.map(p => p.category).filter(c => c && !String(c).startsWith("cat_"));
+      if (ensureCategoryNamesExist(productCats)) {
+        renderCategoryTabs();
+        renderAdminCategoryList();
+      }
       try { localStorage.setItem("shinzan_admin_products", JSON.stringify(PRODUCTS)); } catch (e) {}
       renderProducts();
       renderAdminMenuList();

@@ -124,7 +124,11 @@ export async function syncCategoriesToFirestore(categories: any[]) {
       const cat = categories[i];
       if (!cat || typeof cat !== 'object') continue;
       const docId = sanitizeDocId(cat.id, 'cat', i);
-      await setDoc(doc(db, 'categories', docId), cleanPayload({ ...cat, id: docId, sortIndex: i }));
+      await setDoc(doc(db, 'categories', docId), cleanPayload({ ...cat, id: docId, sortIndex: i }), { merge: true });
+    }
+    const catNames = categories.map((c: any) => (c && c.name ? String(c.name).trim() : '')).filter(Boolean);
+    if (catNames.length > 0) {
+      await setDoc(doc(db, 'settings', 'categories'), cleanPayload({ list: catNames, updatedAt: Date.now() }), { merge: true });
     }
     console.log("Categories saved to Firestore");
   } catch (err) {
@@ -140,7 +144,7 @@ export async function syncProductsToFirestore(products: any[]) {
       const prod = products[i];
       if (!prod || typeof prod !== 'object') continue;
       const docId = sanitizeDocId(prod.id, 'prod', i);
-      await setDoc(doc(db, 'products', docId), cleanPayload({ ...prod, id: docId, sortIndex: i }));
+      await setDoc(doc(db, 'products', docId), cleanPayload({ ...prod, id: docId, sortIndex: i }), { merge: true });
     }
     console.log("Products saved to Firestore");
   } catch (err) {
@@ -153,7 +157,11 @@ export async function syncSingleProductToFirestore(product: any) {
   const path = `products/${docId}`;
   try {
     if (!product || typeof product !== 'object') return;
-    await setDoc(doc(db, 'products', docId), cleanPayload({ ...product, id: docId }), { merge: true });
+    await setDoc(
+      doc(db, 'products', docId),
+      cleanPayload({ ...product, id: docId, updatedAt: product.updatedAt || Date.now() }),
+      { merge: true }
+    );
     console.log(`Product ${docId} synced directly to Firestore`);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -295,6 +303,22 @@ export function initFirestoreDataSync() {
     });
   } catch (err) {
     console.error("Categories onSnapshot failed", err);
+  }
+
+  // 2b. Listen Android Categories List (settings/categories)
+  try {
+    onSnapshot(doc(db, 'settings', 'categories'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data && Array.isArray(data.list) && (window as any).onFirestoreAndroidCategoriesList) {
+          (window as any).onFirestoreAndroidCategoriesList(data.list);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/categories');
+    });
+  } catch (err) {
+    console.error("Android categories list onSnapshot failed", err);
   }
 
   // 3. Listen Products

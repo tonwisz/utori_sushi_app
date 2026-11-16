@@ -1,0 +1,724 @@
+package com.example.utoripos
+
+import android.graphics.Color
+import android.os.Bundle
+import android.view.Menu
+import android.view.View
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
+import androidx.navigation.NavController
+import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.AppBarConfiguration
+import androidx.navigation.ui.navigateUp
+import androidx.navigation.ui.setupActionBarWithNavController
+import androidx.navigation.ui.setupWithNavController
+import com.example.utoripos.data.auth.AuthManager
+import com.example.utoripos.ui.home.HomeFragment
+import com.example.utoripos.data.auth.UserAccount
+import com.example.utoripos.data.auth.UserRole
+import com.example.utoripos.data.sync.SyncManager
+import com.example.utoripos.databinding.ActivityMainBinding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.navigation.NavigationView
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var appBarConfiguration: AppBarConfiguration
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var navController: NavController
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val isPhone = resources.configuration.smallestScreenWidthDp < 600
+        if (isPhone) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        // Inisialisasi background sync manager untuk offline-first cloud sync
+        SyncManager.schedulePeriodicSync(this)
+
+        // Dengarkan pesanan real-time dari website HTML
+        startWebOrderListener()
+
+        setSupportActionBar(binding.appBarMain.toolbar)
+
+        val drawerLayout: DrawerLayout = binding.drawerLayout
+        val navView: NavigationView = binding.navView
+        val navHostFragment = supportFragmentManager
+            .findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+        navController = navHostFragment.navController
+
+        // Top level destinations:
+        appBarConfiguration = AppBarConfiguration(
+            setOf(
+                R.id.nav_home,
+                R.id.nav_stock_management,
+                R.id.nav_printer,
+                R.id.nav_reports,
+                R.id.nav_settings_backup
+            ), drawerLayout
+        )
+        setupActionBarWithNavController(navController, appBarConfiguration)
+        
+        navView.post {
+            for (i in 0 until navView.childCount) {
+                val child = navView.getChildAt(i)
+                if (child is androidx.recyclerview.widget.RecyclerView) {
+                    child.addItemDecoration(CustomDrawerDividerDecoration(this))
+                }
+            }
+        }
+        
+        navView.setNavigationItemSelectedListener { item ->
+            if (item.itemId == R.id.nav_web_orders) {
+                drawerLayout.closeDrawer(GravityCompat.START)
+                showWebOrdersManagerDialog()
+                return@setNavigationItemSelectedListener true
+            }
+
+            val navOptions = androidx.navigation.NavOptions.Builder()
+                .setEnterAnim(R.anim.slide_in_right)
+                .setExitAnim(R.anim.slide_out_left)
+                .setPopEnterAnim(R.anim.slide_in_left)
+                .setPopExitAnim(R.anim.slide_out_right)
+                .setLaunchSingleTop(true)
+                .setRestoreState(true)
+                .build()
+
+            try {
+                navController.navigate(item.itemId, null, navOptions)
+                drawerLayout.closeDrawer(GravityCompat.START)
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        // Setup Login Button in Drawer Header & Role Restrictions
+        setupDrawerHeaderAuth(navView)
+        applyUserRoleRestrictions(AuthManager.getCurrentUser(this))
+
+        // Intercept navigation destination changes if role cannot access
+        navController.addOnDestinationChangedListener { _, destination, _ ->
+            invalidateOptionsMenu()
+            val currentUser = AuthManager.getCurrentUser(this)
+            if (!currentUser.role.hasFullAccess) {
+                if (destination.id == R.id.nav_product_management ||
+                    destination.id == R.id.nav_category_management ||
+                    destination.id == R.id.nav_variation_management ||
+                    destination.id == R.id.nav_settings_backup
+                ) {
+                    Toast.makeText(
+                        this,
+                        "Akses Ditolak: Menu ini tidak dapat diakses oleh ${currentUser.role.displayName}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    binding.root.post {
+                        navController.navigate(R.id.nav_home)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun setupDrawerHeaderAuth(navView: NavigationView) {
+        val headerView = navView.getHeaderView(0)
+        val btnLogout = findViewById<View>(R.id.btnNavLogout) ?: headerView.findViewById<View>(R.id.btnNavLogout)
+        val btnCloudLogin = headerView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCloudLogin)
+
+        updateHeaderUi(headerView, AuthManager.getCurrentUser(this))
+
+        val auth = try {
+            if (com.google.firebase.FirebaseApp.getApps(this).isNotEmpty()) {
+                com.google.firebase.auth.FirebaseAuth.getInstance()
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+
+        val currentUser = auth?.currentUser
+        if (currentUser != null) {
+            btnCloudLogin?.text = currentUser.email?.substringBefore("@") ?: "Cloud Sync"
+        } else {
+            btnCloudLogin?.text = "Masuk / Daftar"
+        }
+
+        btnCloudLogin?.setOnClickListener {
+            val currentAuth = try {
+                if (com.google.firebase.FirebaseApp.getApps(this).isNotEmpty()) {
+                    com.google.firebase.auth.FirebaseAuth.getInstance()
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+
+            if (currentAuth?.currentUser != null) {
+                MaterialAlertDialogBuilder(this)
+                    .setTitle("Akun Cloud (Firebase)")
+                    .setMessage("Masuk sebagai: ${currentAuth.currentUser?.email}\n\nIngin keluar dari akun Cloud?")
+                    .setPositiveButton("Keluar Cloud") { _, _ ->
+                        currentAuth.signOut()
+                        btnCloudLogin.text = "Masuk / Daftar"
+                        Toast.makeText(this, "Berhasil keluar dari Cloud", Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton("Tutup", null)
+                    .show()
+            } else if (currentAuth != null) {
+                showFirebaseAuthDialog(btnCloudLogin)
+            } else {
+                Toast.makeText(this, "Fitur Cloud memerlukan konfigurasi Firebase (google-services.json)", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        btnLogout?.setOnClickListener {
+            startActivity(android.content.Intent(this, LoginActivity::class.java))
+            finish()
+        }
+    }
+
+    private fun showFirebaseAuthDialog(btnCloudLogin: com.google.android.material.button.MaterialButton?) {
+        val context = this
+        val layout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(16), dp(24), dp(16))
+        }
+
+        val emailInput = EditText(context).apply {
+            hint = "Email toko / administrator"
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setSingleLine(true)
+        }
+        layout.addView(emailInput)
+
+        val passInput = EditText(context).apply {
+            hint = "Password"
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD or android.text.InputType.TYPE_CLASS_TEXT
+            setSingleLine(true)
+        }
+        layout.addView(passInput)
+
+        MaterialAlertDialogBuilder(context)
+            .setTitle("Autentikasi Cloud (Firebase)")
+            .setView(layout)
+            .setPositiveButton("Masuk") { _, _ ->
+                val email = emailInput.text.toString().trim()
+                val pass = passInput.text.toString().trim()
+                if (email.isBlank() || pass.isBlank()) {
+                    Toast.makeText(context, "Email dan password wajib diisi", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val auth = try {
+                    if (com.google.firebase.FirebaseApp.getApps(context).isNotEmpty()) {
+                        com.google.firebase.auth.FirebaseAuth.getInstance()
+                    } else null
+                } catch (_: Exception) {
+                    null
+                }
+                if (auth == null) {
+                    Toast.makeText(context, "Firebase belum dikonfigurasi", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                auth.signInWithEmailAndPassword(email, pass)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            val user = task.result?.user
+                            btnCloudLogin?.text = user?.email?.substringBefore("@") ?: "Cloud Sync"
+                            Toast.makeText(context, "Berhasil Masuk ke Cloud!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Gagal Masuk: ${task.exception?.localizedMessage}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+            }
+            .setNeutralButton("Daftar") { _, _ ->
+                val email = emailInput.text.toString().trim()
+                val pass = passInput.text.toString().trim()
+                if (email.isBlank() || pass.isBlank()) {
+                    Toast.makeText(context, "Email dan password wajib diisi untuk pendaftaran", Toast.LENGTH_SHORT).show()
+                    return@setNeutralButton
+                }
+                val auth = try {
+                    if (com.google.firebase.FirebaseApp.getApps(context).isNotEmpty()) {
+                        com.google.firebase.auth.FirebaseAuth.getInstance()
+                    } else null
+                } catch (_: Exception) {
+                    null
+                }
+                if (auth == null) {
+                    Toast.makeText(context, "Firebase belum dikonfigurasi", Toast.LENGTH_SHORT).show()
+                    return@setNeutralButton
+                }
+                auth.createUserWithEmailAndPassword(email, pass)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            val user = task.result?.user
+                            btnCloudLogin?.text = user?.email?.substringBefore("@") ?: "Cloud Sync"
+                            Toast.makeText(context, "Akun Cloud berhasil didaftarkan & Masuk!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Gagal Daftar: ${task.exception?.localizedMessage}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+            }
+            .setNegativeButton("Batal", null)
+            .show()
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun startWebOrderListener() {
+        com.example.utoripos.data.sync.OrderSyncManager.listenForIncomingOrders(this) { order ->
+            runOnUiThread {
+                showIncomingOrderDialog(order)
+            }
+        }
+    }
+
+    private fun showIncomingOrderDialog(order: com.example.utoripos.data.sync.WebOrder) {
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        val titleBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF008F89.toInt())
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+
+        titleBar.addView(TextView(this).apply {
+            text = "🔔 Pesanan Baru dari Website!"
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(android.graphics.Color.WHITE)
+        })
+        titleBar.addView(TextView(this).apply {
+            text = "Asal: ${order.tableNumber}"
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        mainLayout.addView(titleBar)
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(16), dp(24), dp(16))
+        }
+
+        container.addView(TextView(this).apply {
+            text = "Rincian Item:"
+            textSize = 14f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(0xFF26332C.toInt())
+        })
+        container.addView(TextView(this).apply {
+            text = order.itemsSummary
+            textSize = 14f
+            setTextColor(0xFF555555.toInt())
+            setPadding(0, dp(4), 0, dp(12))
+        })
+
+        val formattedTotal = String.format(java.util.Locale("in", "ID"), "Rp %,.0f", order.totalAmount)
+        container.addView(TextView(this).apply {
+            text = "Total Bayar: $formattedTotal"
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(0xFF008F89.toInt())
+        })
+
+        mainLayout.addView(container)
+
+        MaterialAlertDialogBuilder(this)
+            .setView(mainLayout)
+            .setPositiveButton("Terima Pesanan") { _, _ ->
+                com.example.utoripos.data.sync.OrderSyncManager.updateOrderStatus(order.docId, "ACCEPTED")
+                com.example.utoripos.data.sync.OrderSyncManager.pendingAcceptedOrder = order
+                Toast.makeText(this, "Pesanan dari ${order.tableNumber} diterima & dimuat ke pembayaran!", Toast.LENGTH_SHORT).show()
+                navController.navigate(R.id.nav_home)
+            }
+            .setNegativeButton("Tolak") { _, _ ->
+                com.example.utoripos.data.sync.OrderSyncManager.updateOrderStatus(order.docId, "REJECTED")
+            }
+            .show()
+    }
+
+    private fun updateHeaderUi(headerView: View, user: UserAccount) {
+        val tvUserName = headerView.findViewById<TextView>(R.id.tvHeaderUserName)
+        val tvUserRole = headerView.findViewById<TextView>(R.id.tvHeaderUserRole)
+
+        tvUserName?.text = "${user.name} (${user.role.displayName})"
+        tvUserRole?.text = if (user.role.hasFullAccess) {
+            "Hak Akses: Penuh (${user.description})"
+        } else {
+            "Hak Akses: ${user.role.displayName} (Menu Terbatas)"
+        }
+    }
+
+    private fun applyUserRoleRestrictions(user: UserAccount) {
+        val menu = binding.navView.menu
+        val settingsBackupItem = menu.findItem(R.id.nav_settings_backup)
+
+        if (user.role.hasFullAccess) {
+            settingsBackupItem?.isVisible = true
+        } else {
+            // Kasir & Staff tidak dapat mengakses Pengaturan.
+            settingsBackupItem?.isVisible = false
+
+            val currentId = navController.currentDestination?.id
+            if (currentId == R.id.nav_product_management ||
+                currentId == R.id.nav_category_management ||
+                currentId == R.id.nav_variation_management ||
+                currentId == R.id.nav_settings_backup
+            ) {
+                navController.navigate(R.id.nav_home)
+            }
+        }
+    }
+
+
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main, menu)
+        return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        // Warnai semua ikon di top bar menjadi putih
+        for (i in 0 until menu.size()) {
+            val item = menu.getItem(i)
+            item.icon?.setTint(Color.WHITE)
+        }
+        binding.appBarMain.toolbar.overflowIcon?.setTint(Color.WHITE)
+
+        val isHome = navController.currentDestination?.id == R.id.nav_home
+        val webOrdersItem = menu.findItem(R.id.action_web_orders)
+        webOrdersItem?.isVisible = isHome
+
+        if (isHome && webOrdersItem != null) {
+            val actionView = webOrdersItem.actionView
+            val tvBadge = actionView?.findViewById<TextView>(R.id.tvOrderBadge)
+
+            actionView?.setOnClickListener {
+                onOptionsItemSelected(webOrdersItem)
+            }
+
+            try {
+                if (com.google.firebase.FirebaseApp.getApps(this).isNotEmpty()) {
+                    com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                        .collection("orders")
+                        .whereEqualTo("status", "PENDING")
+                        .get()
+                        .addOnSuccessListener { snapshot ->
+                            val count = snapshot.size()
+                            if (count > 0) {
+                                tvBadge?.text = count.toString()
+                                tvBadge?.visibility = View.VISIBLE
+                            } else {
+                                tvBadge?.visibility = View.GONE
+                            }
+                        }
+                }
+            } catch (_: Exception) {}
+        }
+
+        menu.findItem(R.id.action_cart)?.isVisible = isHome
+        menu.findItem(R.id.action_receipt_history)?.isVisible = isHome
+        menu.findItem(R.id.action_table)?.isVisible = isHome
+        menu.findItem(R.id.action_view_grid)?.isVisible = isHome
+        menu.findItem(R.id.action_view_list)?.isVisible = isHome
+        if (isHome) {
+            val host = supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as? NavHostFragment
+            val homeFrag = host?.childFragmentManager?.primaryNavigationFragment as? HomeFragment
+            val tableName = homeFrag?.getSelectedTable() ?: ""
+            menu.findItem(R.id.action_table)?.title = if (tableName.isBlank()) "Meja" else tableName
+        }
+        return super.onPrepareOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (navController.currentDestination?.id == R.id.nav_home) {
+            val host = supportFragmentManager.findFragmentById(R.id.nav_host_fragment_content_main) as? NavHostFragment
+            val homeFrag = host?.childFragmentManager?.primaryNavigationFragment as? HomeFragment
+            when (item.itemId) {
+                R.id.action_web_orders -> {
+                    showWebOrdersManagerDialog()
+                    return true
+                }
+                R.id.action_cart -> {
+                    homeFrag?.openMultipleCartsDialog()
+                    return true
+                }
+                R.id.action_receipt_history -> {
+                    homeFrag?.showReceiptHistory()
+                    return true
+                }
+                R.id.action_table -> {
+                    homeFrag?.openTableDialog()
+                    return true
+                }
+                R.id.action_view_grid -> {
+                    homeFrag?.setGridView()
+                    return true
+                }
+                R.id.action_view_list -> {
+                    homeFrag?.setListView()
+                    return true
+                }
+            }
+        }
+        return super.onOptionsItemSelected(item)
+    }
+
+    private fun showWebOrdersManagerDialog() {
+        val context = this
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setBackgroundColor(0xFF008F89.toInt())
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+
+        val textLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        textLayout.addView(TextView(context).apply {
+            text = "Daftar Pesanan Online (Website)"
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(android.graphics.Color.WHITE)
+        })
+        textLayout.addView(TextView(context).apply {
+            text = "Pantau pesanan masuk secara real-time dari website konsumen."
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        titleBar.addView(textLayout)
+
+        val dialogRef = arrayOfNulls<androidx.appcompat.app.AlertDialog>(1)
+
+        val closeBtn = TextView(context).apply {
+            text = "✕"
+            textSize = 18f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                dialogRef[0]?.dismiss()
+            }
+        }
+        titleBar.addView(closeBtn)
+        mainLayout.addView(titleBar)
+
+        val content = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+
+        val infoText = TextView(context).apply {
+            text = "Memuat pesanan online..."
+            textSize = 14f
+            setTextColor(0xFF757575.toInt())
+            setPadding(dp(8), dp(16), dp(8), dp(16))
+        }
+        content.addView(infoText)
+
+        val scroll = android.widget.ScrollView(context).apply {
+            addView(content)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(360))
+        }
+        mainLayout.addView(scroll)
+
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .setPositiveButton("Tutup", null)
+            .create()
+        dialogRef[0] = dialog
+        dialog.show()
+
+        try {
+            if (com.google.firebase.FirebaseApp.getApps(context).isNotEmpty()) {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                db.collection("orders")
+                    .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .limit(20)
+                    .get()
+                    .addOnSuccessListener { snapshot ->
+                        content.removeAllViews()
+                        if (snapshot.isEmpty) {
+                            content.addView(TextView(context).apply {
+                                text = "Belum ada pesanan dari website."
+                                textSize = 14f
+                                setTextColor(0xFF757575.toInt())
+                                setPadding(dp(8), dp(20), dp(8), dp(20))
+                            })
+                        } else {
+                            snapshot.documents.forEach { doc ->
+                                val status = doc.getString("status") ?: "PENDING"
+                                val table = doc.getString("tableNumber") ?: doc.getString("table") ?: "Meja / Pemesan"
+                                val total = doc.getDouble("totalAmount") ?: doc.getDouble("total") ?: 0.0
+                                val itemsRaw = doc.get("items") as? List<Map<String, Any>> ?: emptyList()
+                                val summary = itemsRaw.joinToString(", ") { item ->
+                                    val name = item["name"] as? String ?: "Item"
+                                    val qty = (item["quantity"] as? Number)?.toInt() ?: 1
+                                    "$qty x $name"
+                                }
+
+                                val card = com.google.android.material.card.MaterialCardView(context).apply {
+                                    radius = dp(10).toFloat()
+                                    cardElevation = 0f
+                                    strokeWidth = dp(1)
+                                    strokeColor = 0xFFE0E0E0.toInt()
+                                    setCardBackgroundColor(android.graphics.Color.WHITE)
+                                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) }
+                                }
+                                val cardContent = LinearLayout(context).apply {
+                                    orientation = LinearLayout.VERTICAL
+                                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                                }
+                                cardContent.addView(TextView(context).apply {
+                                    text = "$table • Status: $status"
+                                    textSize = 15f
+                                    setTypeface(null, android.graphics.Typeface.BOLD)
+                                    setTextColor(if (status == "PENDING") 0xFFD32F2F.toInt() else 0xFF008F89.toInt())
+                                })
+                                cardContent.addView(TextView(context).apply {
+                                    text = summary.ifBlank { "Pesanan dari Website" }
+                                    textSize = 13f
+                                    setTextColor(0xFF555555.toInt())
+                                    setPadding(0, dp(4), 0, dp(6))
+                                })
+                                val formattedTotal = String.format(java.util.Locale("in", "ID"), "Rp %,.0f", total)
+                                cardContent.addView(TextView(context).apply {
+                                    text = "Total: $formattedTotal"
+                                    textSize = 14f
+                                    setTypeface(null, android.graphics.Typeface.BOLD)
+                                    setTextColor(0xFF26332C.toInt())
+                                })
+
+                                if (status == "PENDING") {
+                                    val actionsRow = LinearLayout(context).apply {
+                                        orientation = LinearLayout.HORIZONTAL
+                                        setPadding(0, dp(8), 0, 0)
+                                    }
+                                    actionsRow.addView(com.google.android.material.button.MaterialButton(context).apply {
+                                        text = "Terima"
+                                        isAllCaps = false
+                                        textSize = 12f
+                                        setOnClickListener {
+                                            com.example.utoripos.data.sync.OrderSyncManager.updateOrderStatus(doc.id, "ACCEPTED")
+                                            val itemsRaw = doc.get("items") as? List<Map<String, Any>> ?: emptyList()
+                                            val webOrder = com.example.utoripos.data.sync.WebOrder(
+                                                docId = doc.id,
+                                                tableNumber = table,
+                                                totalAmount = total,
+                                                itemsSummary = summary,
+                                                timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
+                                                items = itemsRaw
+                                            )
+                                            com.example.utoripos.data.sync.OrderSyncManager.pendingAcceptedOrder = webOrder
+                                            Toast.makeText(context, "Pesanan dari $table diterima & dimuat ke pembayaran!", Toast.LENGTH_SHORT).show()
+                                            dialog.dismiss()
+                                            navController.navigate(R.id.nav_home)
+                                        }
+                                    })
+                                    actionsRow.addView(com.google.android.material.button.MaterialButton(context).apply {
+                                        text = "Tolak"
+                                        isAllCaps = false
+                                        textSize = 12f
+                                        backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFC62828.toInt())
+                                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }
+                                        setOnClickListener {
+                                            com.example.utoripos.data.sync.OrderSyncManager.updateOrderStatus(doc.id, "REJECTED")
+                                            dialog.dismiss()
+                                        }
+                                    })
+                                    cardContent.addView(actionsRow)
+                                }
+
+                                card.addView(cardContent)
+                                content.addView(card)
+                            }
+                        }
+                    }
+                    .addOnFailureListener {
+                        content.removeAllViews()
+                        content.addView(TextView(context).apply {
+                            text = "Gagal memuat pesanan: ${it.localizedMessage}"
+                            textSize = 14f
+                            setTextColor(0xFFD32F2F.toInt())
+                        })
+                    }
+            } else {
+                content.removeAllViews()
+                content.addView(TextView(context).apply {
+                    text = "Fitur pesanan cloud memerlukan konfigurasi Firebase (google-services.json)."
+                    textSize = 14f
+                    setTextColor(0xFF757575.toInt())
+                    setPadding(dp(8), dp(16), dp(8), dp(16))
+                })
+            }
+        } catch (e: Exception) {
+            content.removeAllViews()
+            content.addView(TextView(context).apply {
+                text = "Gagal memuat pesanan online."
+                textSize = 14f
+                setTextColor(0xFF757575.toInt())
+            })
+        }
+    }
+
+    override fun onSupportNavigateUp(): Boolean {
+        val navHostFragment = supportFragmentManager
+            .findFragmentById(R.id.nav_host_fragment_content_main) as NavHostFragment
+        val navController = navHostFragment.navController
+        return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
+    }
+}
+
+class CustomDrawerDividerDecoration(private val context: android.content.Context) : androidx.recyclerview.widget.RecyclerView.ItemDecoration() {
+    private val divider = android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#E0E0E0"))
+    private val height = (1 * context.resources.displayMetrics.density).toInt()
+    private val marginStart = (16 * context.resources.displayMetrics.density).toInt()
+    private val marginEnd = (16 * context.resources.displayMetrics.density).toInt()
+
+    override fun getItemOffsets(outRect: android.graphics.Rect, view: View, parent: androidx.recyclerview.widget.RecyclerView, state: androidx.recyclerview.widget.RecyclerView.State) {
+        super.getItemOffsets(outRect, view, parent, state)
+        val position = parent.getChildAdapterPosition(view)
+        val itemCount = state.itemCount
+        if (position > 1 && position < itemCount) {
+            outRect.top = height
+        }
+    }
+
+    override fun onDraw(c: android.graphics.Canvas, parent: androidx.recyclerview.widget.RecyclerView, state: androidx.recyclerview.widget.RecyclerView.State) {
+        val left = parent.paddingLeft + marginStart
+        val right = parent.width - parent.paddingRight - marginEnd
+        val itemCount = state.itemCount
+
+        for (i in 0 until parent.childCount) {
+            val child = parent.getChildAt(i)
+            val adapterPosition = parent.getChildAdapterPosition(child)
+            if (adapterPosition > 1 && adapterPosition < itemCount) {
+                val params = child.layoutParams as androidx.recyclerview.widget.RecyclerView.LayoutParams
+                val top = child.top - params.topMargin - height
+                val bottom = top + height
+                divider.setBounds(left, top, right, bottom)
+                divider.draw(c)
+            }
+        }
+    }
+}

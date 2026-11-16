@@ -1,0 +1,2201 @@
+package com.example.utoripos.ui.stock
+
+import android.os.Bundle
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
+import android.view.Gravity
+import android.widget.EditText
+import android.widget.HorizontalScrollView
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.TextView
+import android.widget.Toast
+import com.example.utoripos.data.Product
+import com.google.android.material.button.MaterialButton
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import android.content.Intent
+import com.example.utoripos.R
+import com.example.utoripos.data.AppDatabase
+import com.example.utoripos.data.CompanySettings
+import com.example.utoripos.data.IngredientInventoryStore
+import com.example.utoripos.data.IngredientRecord
+import com.example.utoripos.data.RecipeRecord
+import com.example.utoripos.data.UnitDefinition
+import com.example.utoripos.databinding.FragmentStockManagementBinding
+import com.example.utoripos.ui.printer.BluetoothPrintService
+import com.example.utoripos.ui.printer.BluetoothPrinterStore
+import java.io.File
+import java.util.Date
+import com.google.android.material.chip.Chip
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.textfield.TextInputLayout
+import java.util.Locale
+import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class StockManagementFragment : Fragment() {
+    private var _binding: FragmentStockManagementBinding? = null
+    private val binding get() = _binding!!
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+        _binding = FragmentStockManagementBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        binding.rowAddIngredient.setOnClickListener { showKelolaBahanDashboard() }
+        binding.rowManageRecipes.setOnClickListener { showRecipeManager() }
+        binding.rowStockReport.setOnClickListener { showStockReport() }
+        refreshInventory()
+    }
+
+    private fun refreshInventory() {
+        val items = IngredientInventoryStore.ingredients(requireContext())
+        val low = items.count { it.stockInBase <= it.minimumInBase }
+        binding.tvInventorySummary.text = "${items.size} bahan terdaftar  ·  $low perlu restock  ·  ${IngredientInventoryStore.recipes(requireContext()).map { it.productName }.distinct().size} menu punya resep"
+    }
+
+    private fun showIngredientEditor(existing: IngredientRecord?, onSaved: (() -> Unit)? = null) {
+        val context = requireContext()
+        val preferred = existing?.units?.maxByOrNull { it.baseFactor } ?: existing?.let { UnitDefinition(it.baseUnit, 1.0) }
+
+        val name = input("Nama bahan", existing?.name.orEmpty())
+        val baseUnitInput = input("Satuan dasar (g, ml, pcs)", existing?.baseUnit ?: "g")
+        val bigUnitInput = input("Satuan besar (kg, liter, pack)", preferred?.name ?: "kg")
+
+        val conversionFactorValue = preferred?.let { number(it.baseFactor) } ?: "1000"
+        val conversionInput = input("Nilai konversi", if (existing != null) conversionFactorValue else "1000", true)
+
+        val categories = IngredientInventoryStore.categories(context)
+        val categorySpinner = spinner(categories).apply {
+            val index = categories.indexOfFirst { it.equals(existing?.category ?: "Lainnya", true) }
+            if (index >= 0) setSelection(index)
+        }
+
+        val currentBigUnit = bigUnitInput.text.toString().trim().ifBlank { "kg" }
+        val stock = input("Stok awal ($currentBigUnit)", existing?.let { number(it.stockInBase / (preferred?.baseFactor ?: 1.0)) } ?: "", true)
+        val min = input("Batas minimum ($currentBigUnit)", existing?.let { number(it.minimumInBase / (preferred?.baseFactor ?: 1.0)) } ?: "", true)
+
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Custom Title Header (Theme Green background, White text)
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        titleBar.addView(TextView(context).apply {
+            text = if (existing == null) "Tambah bahan" else "Edit bahan & satuan"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        titleBar.addView(TextView(context).apply {
+            text = "Kelola informasi bahan, satuan konversi, dan stok awal"
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        mainLayout.addView(titleBar)
+
+        val content = form()
+        content.addView(field("Nama bahan", name))
+
+        val categoryHeaderRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        categoryHeaderRow.addView(TextView(context).apply {
+            text = "Kategori bahan"
+            textSize = 13f
+            setTextColor(MUTED)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        })
+
+        val btnManageCat = TextView(context).apply {
+            text = "+ Tambah / Ubah"
+            textSize = 12f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(GREEN)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                showCategoryManager {
+                    val updatedCategories = IngredientInventoryStore.categories(context)
+                    categorySpinner.adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, updatedCategories)
+                    val newIndex = updatedCategories.indexOfFirst { it.equals(existing?.category ?: "Lainnya", true) }
+                    if (newIndex >= 0) categorySpinner.setSelection(newIndex)
+                }
+            }
+        }
+        categoryHeaderRow.addView(btnManageCat)
+
+        content.addView(categoryHeaderRow)
+        content.addView(categorySpinner)
+
+        // Side-by-side units row
+        val unitsRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) }
+        }
+        val leftField = field("Satuan dasar (resep)", baseUnitInput).apply {
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) }
+        }
+        val rightField = field("Satuan besar (grosir)", bigUnitInput).apply {
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) }
+        }
+        unitsRow.addView(leftField)
+        unitsRow.addView(rightField)
+        content.addView(unitsRow)
+
+        // Conversion helper row
+        content.addView(label("Faktor Konversi Satuan"))
+
+        val convRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = roundedBg(0xFFF0F4F1.toInt(), dp(8).toFloat())
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
+        }
+
+        val tvBigUnitLabel = TextView(context).apply {
+            text = "1 ${bigUnitInput.text.toString().ifBlank { "kg" }} = "
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xFF26332C.toInt())
+        }
+        convRow.addView(tvBigUnitLabel)
+
+        conversionInput.layoutParams = LinearLayout.LayoutParams(dp(90), dp(40)).apply {
+            marginStart = dp(6)
+            marginEnd = dp(6)
+        }
+        conversionInput.gravity = Gravity.CENTER
+        conversionInput.background = roundedBg(Color.WHITE, dp(6).toFloat())
+        convRow.addView(conversionInput)
+
+        val tvBaseUnitLabel = TextView(context).apply {
+            text = baseUnitInput.text.toString().ifBlank { "g" }
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xFF26332C.toInt())
+        }
+        convRow.addView(tvBaseUnitLabel)
+
+        content.addView(convRow)
+
+        // TextWatcher to live update labels
+        val updateLabels = {
+            val bigStr = bigUnitInput.text.toString().trim().ifBlank { "kg" }
+            val baseStr = baseUnitInput.text.toString().trim().ifBlank { "g" }
+            tvBigUnitLabel.text = "1 $bigStr = "
+            tvBaseUnitLabel.text = baseStr
+            (stock.parent as? TextInputLayout)?.hint = "Stok awal ($bigStr)"
+            (min.parent as? TextInputLayout)?.hint = "Batas minimum ($bigStr)"
+        }
+
+        val unitWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { updateLabels() }
+            override fun afterTextChanged(s: Editable?) {}
+        }
+        baseUnitInput.addTextChangedListener(unitWatcher)
+        bigUnitInput.addTextChangedListener(unitWatcher)
+
+        content.addView(field("Stok awal", stock))
+        content.addView(field("Batas minimum", min))
+
+        val scroll = ScrollView(context).apply {
+            addView(content)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(400))
+        }
+        mainLayout.addView(scroll)
+
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Simpan", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val itemName = name.text.toString().trim()
+                val baseUnit = baseUnitInput.text.toString().trim()
+                val bigUnit = bigUnitInput.text.toString().trim().ifBlank { baseUnit }
+                val convFactor = numeric(conversionInput) ?: 1.0
+
+                val stockQty = numeric(stock)
+                val minQty = numeric(min)
+
+                if (itemName.isBlank() || baseUnit.isBlank()) {
+                    name.error = if (itemName.isBlank()) "Nama wajib diisi" else null
+                    baseUnitInput.error = if (baseUnit.isBlank()) "Satuan dasar wajib diisi" else null
+                    return@setOnClickListener
+                }
+                if (stockQty == null || minQty == null || stockQty < 0 || minQty < 0) {
+                    stock.error = "Isi stok dan batas minimum dengan angka valid"; return@setOnClickListener
+                }
+                if (convFactor <= 0) {
+                    conversionInput.error = "Faktor konversi harus > 0"; return@setOnClickListener
+                }
+
+                val units = mutableListOf<UnitDefinition>()
+                units.add(UnitDefinition(baseUnit, 1.0))
+                if (!bigUnit.equals(baseUnit, true)) {
+                    units.add(UnitDefinition(bigUnit, convFactor))
+                }
+                val preferredUnit = units.maxByOrNull { it.baseFactor } ?: UnitDefinition(baseUnit, 1.0)
+                val factor = preferredUnit.baseFactor
+
+                IngredientInventoryStore.saveIngredient(
+                    context,
+                    IngredientRecord(existing?.id ?: UUID.randomUUID().toString(), itemName, baseUnit,
+                        stockQty * factor, minQty * factor, units, categorySpinner.selectedItem.toString())
+                )
+                dialog.dismiss()
+                refreshInventory()
+                onSaved?.invoke()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showKelolaBahanDashboard() {
+        val context = requireContext()
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFFF7F7F2.toInt())
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+        }
+
+        // Top Bar
+        val topBar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(8), 0, dp(20), 0)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(58))
+        }
+        val btnBack = TextView(context).apply {
+            text = "‹"
+            textSize = 36f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Kembali"
+            layoutParams = LinearLayout.LayoutParams(dp(48), -1)
+        }
+        topBar.addView(btnBack)
+        topBar.addView(TextView(context).apply {
+            text = "Kelola Bahan"
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        })
+        mainLayout.addView(topBar)
+
+        val contentContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+
+        contentContainer.addView(TextView(context).apply {
+            text = "Kelola daftar bahan baku, stok, satuan, dan kategori."
+            textSize = 13f
+            setTextColor(MUTED)
+            setPadding(0, 0, 0, dp(12))
+        })
+
+        // Search bar with search icon
+        val searchInput = EditText(context).apply {
+            hint = "Cari bahan"
+            textSize = 14f
+            setSingleLine(true)
+            background = null
+        }
+        val searchLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            layoutParams = android.widget.FrameLayout.LayoutParams(-1, -1)
+        }
+        searchLayout.addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_search)
+            imageTintList = ColorStateList.valueOf(MUTED)
+            layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(8) }
+        })
+        searchLayout.addView(searchInput, LinearLayout.LayoutParams(0, -1, 1f))
+
+        val searchCard = com.google.android.material.card.MaterialCardView(context).apply {
+            radius = dp(10).toFloat()
+            cardElevation = 0f
+            strokeWidth = dp(1)
+            strokeColor = 0xFFE0E0E0.toInt()
+            setCardBackgroundColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(12) }
+            addView(searchLayout)
+        }
+        contentContainer.addView(searchCard)
+
+        // Category filter chips
+        val chipGroup = com.google.android.material.chip.ChipGroup(context).apply {
+            isSingleSelection = true
+            isSingleLine = true
+        }
+        val chipScroll = HorizontalScrollView(context).apply {
+            addView(chipGroup)
+            isHorizontalScrollBarEnabled = false
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
+        }
+        contentContainer.addView(chipScroll)
+
+        val listLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val scroll = ScrollView(context).apply {
+            addView(listLayout)
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
+        }
+        contentContainer.addView(scroll)
+        mainLayout.addView(contentContainer)
+
+        // Bottom Button "Tambah Bahan" pinned to the very bottom
+        var populateIngredients: (String) -> Unit = {}
+
+        val bottomBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(16))
+            setBackgroundColor(Color.WHITE)
+            elevation = dp(4).toFloat()
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+        }
+        val btnAddIngredient = MaterialButton(context).apply {
+            text = "Tambah Bahan"
+            isAllCaps = false
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(GREEN)
+            cornerRadius = dp(10)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(52))
+            setOnClickListener {
+                showIngredientEditor(null) {
+                    populateIngredients(searchInput.text.toString())
+                    refreshInventory()
+                }
+            }
+        }
+        bottomBar.addView(btnAddIngredient)
+        mainLayout.addView(bottomBar)
+
+        val dialog = MaterialAlertDialogBuilder(context, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen)
+            .setView(mainLayout)
+            .create()
+
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+
+        btnBack.setOnClickListener { dialog.dismiss() }
+
+        var selectedCategoryFilter = "Semua"
+
+        populateIngredients = { query ->
+            listLayout.removeAllViews()
+            chipGroup.removeAllViews()
+
+            val allIngredients = IngredientInventoryStore.ingredients(context)
+            val categories = listOf("Semua") + IngredientInventoryStore.categories(context)
+
+            categories.forEachIndexed { index, cat ->
+                val chip = Chip(context).apply {
+                    text = if (index == 0) "Semua (${allIngredients.size})" else "$cat (${allIngredients.count { it.category.equals(cat, true) }})"
+                    isCheckable = true
+                    isClickable = true
+                    isCheckedIconVisible = false
+                    setEnsureMinTouchTargetSize(false)
+
+                    val states = arrayOf(
+                        intArrayOf(android.R.attr.state_checked),
+                        intArrayOf(-android.R.attr.state_checked)
+                    )
+                    chipBackgroundColor = ColorStateList(
+                        states,
+                        intArrayOf(0xFF008F89.toInt(), 0xFFE9ECE9.toInt())
+                    )
+                    chipStrokeColor = ColorStateList(
+                        states,
+                        intArrayOf(0xFF00796B.toInt(), 0xFFD5DED8.toInt())
+                    )
+                    chipStrokeWidth = dp(1).toFloat()
+                    setTextColor(
+                        ColorStateList(
+                            states,
+                            intArrayOf(Color.WHITE, 0xFF34423B.toInt())
+                        )
+                    )
+                    isChecked = cat.equals(selectedCategoryFilter, true) || (index == 0 && selectedCategoryFilter == "Semua")
+                    setOnClickListener {
+                        selectedCategoryFilter = cat
+                        populateIngredients(query)
+                    }
+                }
+                chipGroup.addView(chip)
+            }
+
+            val filtered = allIngredients.filter { ing ->
+                val matchCat = selectedCategoryFilter == "Semua" || ing.category.equals(selectedCategoryFilter, true)
+                val matchQuery = query.isBlank() || ing.name.contains(query, true) || ing.baseUnit.contains(query, true)
+                matchCat && matchQuery
+            }.sortedBy { it.name.lowercase() }
+
+            if (filtered.isEmpty()) {
+                listLayout.addView(TextView(context).apply {
+                    text = if (query.isBlank()) "Belum ada bahan. Klik 'Tambah Bahan' di bawah." else "Tidak ada bahan ditemukan"
+                    textSize = 14f
+                    setTextColor(MUTED)
+                    setPadding(dp(16), dp(32), dp(16), dp(32))
+                    gravity = Gravity.CENTER
+                })
+            } else {
+                val card = com.google.android.material.card.MaterialCardView(context).apply {
+                    radius = dp(14).toFloat()
+                    cardElevation = 0f
+                    strokeWidth = dp(1)
+                    strokeColor = 0xFFE0E0E0.toInt()
+                    setCardBackgroundColor(Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(-1, -2)
+                }
+                val cardContent = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                }
+
+                filtered.forEachIndexed { index, item ->
+                    val display = item.units.maxByOrNull { it.baseFactor } ?: UnitDefinition(item.baseUnit, 1.0)
+                    val amount = item.stockInBase / display.baseFactor
+                    val minimum = item.minimumInBase / display.baseFactor
+                    val isLow = item.stockInBase <= item.minimumInBase
+
+                    val row = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(18), dp(15), dp(16), dp(15))
+                        minimumHeight = dp(72)
+                        isClickable = true
+                        isFocusable = true
+                        setOnClickListener {
+                            showIngredientEditor(item) {
+                                populateIngredients(searchInput.text.toString())
+                                refreshInventory()
+                            }
+                        }
+                    }
+
+                    val texts = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    }
+                    val titleRow = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                    }
+                    titleRow.addView(TextView(context).apply {
+                        text = item.name
+                        textSize = 15f
+                        setTypeface(typeface, Typeface.BOLD)
+                        setTextColor(0xFF26332C.toInt())
+                    })
+                    if (isLow) {
+                        titleRow.addView(TextView(context).apply {
+                            text = "RESTOCK"
+                            textSize = 10f
+                            setTypeface(typeface, Typeface.BOLD)
+                            setTextColor(Color.WHITE)
+                            setPadding(dp(6), dp(2), dp(6), dp(2))
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(0xFFC62828.toInt())
+                                cornerRadius = dp(4).toFloat()
+                            }
+                            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) }
+                        })
+                    }
+                    texts.addView(titleRow)
+
+                    texts.addView(TextView(context).apply {
+                        text = "Stok: ${number(amount)} ${display.name}  •  Min: ${number(minimum)} ${display.name}"
+                        textSize = 13f
+                        setTextColor(MUTED)
+                        setPadding(0, dp(3), 0, 0)
+                    })
+
+                    row.addView(texts)
+
+                    row.addView(TextView(context).apply {
+                        text = "›"
+                        textSize = 28f
+                        setTextColor(GREEN)
+                        setPadding(dp(8), 0, 0, 0)
+                    })
+
+                    cardContent.addView(row)
+
+                    if (index < filtered.lastIndex) {
+                        cardContent.addView(View(context).apply {
+                            setBackgroundColor(0xFFE0E0E0.toInt())
+                            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                                marginStart = dp(18)
+                                marginEnd = dp(18)
+                            }
+                        })
+                    }
+                }
+
+                card.addView(cardContent)
+                listLayout.addView(card)
+            }
+        }
+
+        searchInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                populateIngredients(s?.toString().orEmpty())
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        populateIngredients("")
+        dialog.show()
+    }
+
+    private fun showRestockDialog(item: IngredientRecord) {
+        val qty = input("Jumlah restock", "", true)
+        val unit = spinner(item.units.map { it.name })
+        val form = form().apply { addView(field("Jumlah", qty)); addView(label("Satuan pembelian")); addView(unit) }
+        val dialog = MaterialAlertDialogBuilder(requireContext()).setTitle("Restock ${item.name}")
+            .setView(form).setNegativeButton("Batal", null).setPositiveButton("Tambah stok", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val value = numeric(qty)
+                if (value == null || value <= 0) { qty.error = "Jumlah harus lebih dari nol"; return@setOnClickListener }
+                if (IngredientInventoryStore.addStock(requireContext(), item.id, value, unit.selectedItem.toString())) {
+                    dialog.dismiss(); refreshInventory()
+                    Toast.makeText(requireContext(), "Stok ${item.name} bertambah", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+
+
+    private fun showCategoryManager(onDismiss: (() -> Unit)? = null) {
+        val context = requireContext()
+
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Custom Title Header (Theme Green background, White text)
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        titleBar.addView(TextView(context).apply {
+            text = "Kategori Bahan"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        titleBar.addView(TextView(context).apply {
+            text = "Tambah, ubah, atau hapus kategori bahan baku"
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        mainLayout.addView(titleBar)
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(20), dp(14))
+        }
+
+        // Add Category Input Row (Outlined Card)
+        val addRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(14))
+        }
+
+        val etNewCategory = input("Nama kategori baru", "")
+        val catInputCard = com.google.android.material.card.MaterialCardView(context).apply {
+            radius = dp(8).toFloat()
+            cardElevation = 0f
+            strokeWidth = dp(1)
+            strokeColor = 0xFFE0E0E0.toInt()
+            setCardBackgroundColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginEnd = dp(8) }
+            addView(etNewCategory.apply {
+                background = null
+                textSize = 14f
+                setPadding(dp(12), 0, dp(12), 0)
+            })
+        }
+        val btnAddCat = MaterialButton(context).apply {
+            text = "+ Tambah"
+            isAllCaps = false
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(GREEN)
+            cornerRadius = dp(8)
+            layoutParams = LinearLayout.LayoutParams(-2, dp(44))
+        }
+        addRow.addView(catInputCard)
+        addRow.addView(btnAddCat)
+        container.addView(addRow)
+
+        val listLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val scroll = ScrollView(context).apply {
+            addView(listLayout)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(320))
+        }
+        container.addView(scroll)
+        mainLayout.addView(container)
+
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .setPositiveButton("Selesai") { d, _ ->
+                d.dismiss()
+                onDismiss?.invoke()
+            }
+            .setOnDismissListener {
+                onDismiss?.invoke()
+            }
+            .create()
+
+        fun populateList() {
+            listLayout.removeAllViews()
+            val categories = IngredientInventoryStore.categories(context)
+
+            val card = com.google.android.material.card.MaterialCardView(context).apply {
+                radius = dp(12).toFloat()
+                cardElevation = 0f
+                strokeWidth = dp(1)
+                strokeColor = 0xFFE0E0E0.toInt()
+                setCardBackgroundColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(-1, -2)
+            }
+            val cardContent = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+
+            categories.forEachIndexed { index, cat ->
+                val row = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), dp(12), dp(16), dp(12))
+                }
+
+                row.addView(TextView(context).apply {
+                    text = cat
+                    textSize = 15f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(0xFF26332C.toInt())
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                })
+
+                val actionsRow = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+
+                // Edit/Ubah button
+                val btnEdit = TextView(context).apply {
+                    text = "Ubah"
+                    textSize = 13f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(GREEN)
+                    setPadding(dp(8), dp(4), dp(8), dp(4))
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener {
+                        showEditCategoryDialog(cat) {
+                            refreshInventory()
+                            populateList()
+                        }
+                    }
+                }
+                actionsRow.addView(btnEdit)
+
+                // Delete/Hapus button (Lainnya is protected system fallback category)
+                if (!cat.equals("Lainnya", true)) {
+                    val btnDelete = TextView(context).apply {
+                        text = "Hapus"
+                        textSize = 13f
+                        setTypeface(typeface, Typeface.BOLD)
+                        setTextColor(0xFFC62828.toInt())
+                        setPadding(dp(8), dp(4), dp(8), dp(4))
+                        isClickable = true
+                        isFocusable = true
+                        setOnClickListener {
+                            showDeleteCategoryConfirmation(cat) {
+                                refreshInventory()
+                                populateList()
+                            }
+                        }
+                    }
+                    actionsRow.addView(btnDelete)
+                }
+
+                row.addView(actionsRow)
+                cardContent.addView(row)
+
+                if (index < categories.lastIndex) {
+                    cardContent.addView(View(context).apply {
+                        setBackgroundColor(0xFFE0E0E0.toInt())
+                        layoutParams = LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(16); marginEnd = dp(16) }
+                    })
+                }
+            }
+
+            card.addView(cardContent)
+            listLayout.addView(card)
+        }
+
+        btnAddCat.setOnClickListener {
+            val name = etNewCategory.text.toString().trim()
+            if (name.isBlank()) {
+                etNewCategory.error = "Nama kategori tidak boleh kosong"
+                return@setOnClickListener
+            }
+            if (!IngredientInventoryStore.addCategory(context, name)) {
+                etNewCategory.error = "Kategori sudah ada"
+                return@setOnClickListener
+            }
+            etNewCategory.setText("")
+            Toast.makeText(context, "Kategori '$name' ditambahkan", Toast.LENGTH_SHORT).show()
+            refreshInventory()
+            populateList()
+        }
+
+        populateList()
+        dialog.show()
+    }
+
+    private fun showDeleteCategoryConfirmation(cat: String, onDeleted: () -> Unit) {
+        val context = requireContext()
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Custom Title Header (Theme Green background, White text)
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        titleBar.addView(TextView(context).apply {
+            text = "Hapus Kategori?"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        titleBar.addView(TextView(context).apply {
+            text = "Kategori: $cat"
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        mainLayout.addView(titleBar)
+
+        val bodyText = TextView(context).apply {
+            text = "Apakah Anda yakin ingin menghapus kategori '$cat'? Bahan baku dalam kategori ini akan dipindahkan ke kategori 'Lainnya'."
+            textSize = 14f
+            setTextColor(0xFF26332C.toInt())
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        mainLayout.addView(bodyText)
+
+        MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Hapus") { _, _ ->
+                if (!IngredientInventoryStore.deleteCategory(context, cat)) {
+                    Toast.makeText(context, "Kategori bawaan dipertahankan.", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Kategori '$cat' dihapus", Toast.LENGTH_SHORT).show()
+                }
+                onDeleted()
+            }
+            .show()
+    }
+
+    private fun showEditCategoryDialog(oldCategory: String, onUpdated: () -> Unit) {
+        val context = requireContext()
+        val nameInput = input("Nama kategori", oldCategory)
+
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Custom Title Header (Theme Green background, White text)
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        titleBar.addView(TextView(context).apply {
+            text = "Ubah Nama Kategori"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        titleBar.addView(TextView(context).apply {
+            text = "Kategori: $oldCategory"
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        mainLayout.addView(titleBar)
+
+        val content = form()
+        content.addView(field("Nama kategori baru", nameInput))
+        mainLayout.addView(content)
+
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Simpan", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val newName = nameInput.text.toString().trim()
+                if (newName.isBlank()) {
+                    nameInput.error = "Nama wajib diisi"
+                    return@setOnClickListener
+                }
+                if (!IngredientInventoryStore.updateCategory(context, oldCategory, newName)) {
+                    nameInput.error = "Kategori sudah ada atau tidak valid"
+                    return@setOnClickListener
+                }
+                Toast.makeText(context, "Kategori diubah menjadi '$newName'", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                onUpdated()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showStockReport() {
+        val context = requireContext()
+        val categories = listOf("Semua kategori") + IngredientInventoryStore.categories(context)
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+
+        // Custom Title Header (Theme Green background, White text)
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF008F89.toInt()) // COLOR_GREEN
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        titleBar.addView(TextView(context).apply {
+            text = "Filter laporan stok"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        titleBar.addView(TextView(context).apply {
+            text = "Pilih kategori bahan untuk melihat laporan stok"
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        mainLayout.addView(titleBar)
+
+        val scrollContent = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+
+        val dialogBuilder = MaterialAlertDialogBuilder(context)
+        lateinit var dialog: androidx.appcompat.app.AlertDialog
+
+        categories.forEachIndexed { index, category ->
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(24), dp(15), dp(24), dp(15))
+                minimumHeight = dp(56)
+                setOnClickListener {
+                    dialog.dismiss()
+                    val selected = category
+                    val items = IngredientInventoryStore.ingredients(context).let { list ->
+                        if (selected == "Semua kategori") list else list.filter { it.category.equals(selected, true) }
+                    }
+                    val low = items.count { it.stockInBase <= it.minimumInBase }
+                    val reportContainer = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(0, dp(4), 0, dp(4))
+                    }
+
+                    // Custom Title Header (Theme Green background, White text)
+                    val reportTitleBar = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setBackgroundColor(0xFF008F89.toInt()) // COLOR_GREEN
+                        setPadding(dp(24), dp(18), dp(24), dp(18))
+                    }
+                    reportTitleBar.addView(TextView(context).apply {
+                        text = "Laporan stok · $selected"
+                        textSize = 18f
+                        setTypeface(typeface, Typeface.BOLD)
+                        setTextColor(Color.WHITE)
+                    })
+                    reportTitleBar.addView(TextView(context).apply {
+                        text = "${items.size} bahan · $low perlu restock"
+                        textSize = 12f
+                        setTextColor(0xFFE0F2F1.toInt())
+                        setPadding(0, dp(2), 0, 0)
+                    })
+
+                    val reportMainLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                    }
+                    reportMainLayout.addView(reportTitleBar)
+
+                    val reportScrollContent = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(0, dp(4), 0, dp(4))
+                    }
+
+                    if (items.isEmpty()) {
+                        reportScrollContent.addView(TextView(context).apply {
+                            text = "Tidak ada bahan dalam kategori ini."
+                            textSize = 14f
+                            setTextColor(0xFF757575.toInt())
+                            setPadding(dp(24), dp(20), dp(24), dp(20))
+                        })
+                    } else {
+                        items.sortedBy { it.name }.forEachIndexed { i, item ->
+                            val amount = item.stockInBase
+                            val minimum = item.minimumInBase
+                            val unitName = item.baseUnit
+                            val isLow = item.stockInBase <= item.minimumInBase
+
+                            val row = LinearLayout(context).apply {
+                                orientation = LinearLayout.VERTICAL
+                                setPadding(dp(24), dp(12), dp(24), dp(12))
+                            }
+
+                            val topRow = LinearLayout(context).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.CENTER_VERTICAL
+                            }
+                            topRow.addView(TextView(context).apply {
+                                text = item.name
+                                textSize = 15f
+                                setTypeface(typeface, Typeface.BOLD)
+                                setTextColor(0xFF26332C.toInt())
+                                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                            })
+
+                            if (isLow) {
+                                topRow.addView(TextView(context).apply {
+                                    text = "RESTOCK"
+                                    textSize = 10f
+                                    setTypeface(typeface, Typeface.BOLD)
+                                    setTextColor(Color.WHITE)
+                                    setPadding(dp(6), dp(2), dp(6), dp(2))
+                                    background = android.graphics.drawable.GradientDrawable().apply {
+                                        setColor(0xFFC62828.toInt())
+                                        cornerRadius = dp(4).toFloat()
+                                    }
+                                })
+                            }
+                            row.addView(topRow)
+
+                            row.addView(TextView(context).apply {
+                                text = "Stok: ${number(amount)} $unitName  •  Minimum: ${number(minimum)} $unitName"
+                                textSize = 13f
+                                setTextColor(0xFF757575.toInt())
+                                setPadding(0, dp(3), 0, 0)
+                            })
+
+                            reportScrollContent.addView(row)
+
+                            if (i < items.lastIndex) {
+                                reportScrollContent.addView(View(context).apply {
+                                    setBackgroundColor(0xFFE0E0E0.toInt())
+                                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                                        marginStart = dp(24)
+                                        marginEnd = dp(24)
+                                    }
+                                })
+                            }
+                        }
+                    }
+
+                    reportContainer.addView(ScrollView(context).apply {
+                        addView(reportScrollContent)
+                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(360))
+                    })
+
+                    reportMainLayout.addView(reportContainer)
+
+                    val bottomActions = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(dp(16), dp(12), dp(16), dp(16))
+                        setBackgroundColor(Color.WHITE)
+                        gravity = Gravity.END
+                    }
+
+                    val btnCetak = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                        text = "Cetak"
+                        isAllCaps = false
+                        setTextColor(GREEN)
+                        strokeColor = ColorStateList.valueOf(GREEN)
+                        cornerRadius = dp(8)
+                        layoutParams = LinearLayout.LayoutParams(-2, dp(40)).apply { marginEnd = dp(8) }
+                        setOnClickListener {
+                            printStockReport(selected, items)
+                        }
+                    }
+                    bottomActions.addView(btnCetak)
+
+                    val btnKirim = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                        text = "Kirim"
+                        isAllCaps = false
+                        setTextColor(GREEN)
+                        strokeColor = ColorStateList.valueOf(GREEN)
+                        cornerRadius = dp(8)
+                        layoutParams = LinearLayout.LayoutParams(-2, dp(40)).apply { marginEnd = dp(8) }
+                        setOnClickListener {
+                            showShareOptionsDialog(selected, items)
+                        }
+                    }
+                    bottomActions.addView(btnKirim)
+
+                    val btnTutup = MaterialButton(context).apply {
+                        text = "Tutup"
+                        isAllCaps = false
+                        setTextColor(Color.WHITE)
+                        backgroundTintList = ColorStateList.valueOf(GREEN)
+                        cornerRadius = dp(8)
+                        layoutParams = LinearLayout.LayoutParams(-2, dp(40))
+                    }
+                    bottomActions.addView(btnTutup)
+
+                    reportMainLayout.addView(bottomActions)
+
+                    val reportDialog = MaterialAlertDialogBuilder(context)
+                        .setView(reportMainLayout)
+                        .create()
+
+                    btnTutup.setOnClickListener { reportDialog.dismiss() }
+                    reportDialog.show()
+                }
+            }
+
+            row.addView(TextView(context).apply {
+                text = category
+                textSize = 15f
+                setTextColor(0xFF26332C.toInt())
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            })
+
+            scrollContent.addView(row)
+
+            if (index < categories.lastIndex) {
+                // Divider line not reaching edges (inset start=24dp, end=24dp)
+                scrollContent.addView(View(context).apply {
+                    setBackgroundColor(0xFFE0E0E0.toInt())
+                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply {
+                        marginStart = dp(24)
+                        marginEnd = dp(24)
+                    }
+                })
+            }
+        }
+
+        container.addView(ScrollView(context).apply {
+            addView(scrollContent)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(320))
+        })
+
+        mainLayout.addView(container)
+
+        dialog = dialogBuilder
+            .setView(mainLayout)
+            .setNegativeButton("Batal", null)
+            .create()
+
+        dialog.show()
+    }
+
+    private fun showRecipeManager() {
+        showRecipeDashboard()
+    }
+
+    private fun showRecipeDashboard() {
+        val context = requireContext()
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFFF7F7F2.toInt())
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+        }
+
+        // Top Bar
+        val topBar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(8), 0, dp(20), 0)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(58))
+        }
+        val btnBack = TextView(context).apply {
+            text = "‹"
+            textSize = 36f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Kembali"
+            layoutParams = LinearLayout.LayoutParams(dp(48), -1)
+        }
+        topBar.addView(btnBack)
+        topBar.addView(TextView(context).apply {
+            text = "Kelola Menu (Resep)"
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        })
+        mainLayout.addView(topBar)
+
+        val contentContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        }
+
+        contentContainer.addView(TextView(context).apply {
+            text = "Buat resep produk dari bahan baku yang telah ditambahkan. Produk dengan resep akan terhubung dengan stok bahan baku."
+            textSize = 13f
+            setTextColor(MUTED)
+            setPadding(0, 0, 0, dp(12))
+        })
+
+        // Search bar with search icon
+        val searchInput = EditText(context).apply {
+            hint = "Cari resep produk"
+            textSize = 14f
+            setSingleLine(true)
+            background = null
+        }
+        val searchLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, dp(12), 0)
+            layoutParams = android.widget.FrameLayout.LayoutParams(-1, -1)
+        }
+        searchLayout.addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_search)
+            imageTintList = ColorStateList.valueOf(MUTED)
+            layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(8) }
+        })
+        searchLayout.addView(searchInput, LinearLayout.LayoutParams(0, -1, 1f))
+
+        val searchCard = com.google.android.material.card.MaterialCardView(context).apply {
+            radius = dp(10).toFloat()
+            cardElevation = 0f
+            strokeWidth = dp(1)
+            strokeColor = 0xFFE0E0E0.toInt()
+            setCardBackgroundColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(16) }
+            addView(searchLayout)
+        }
+        contentContainer.addView(searchCard)
+
+        val listLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val scroll = ScrollView(context).apply {
+            addView(listLayout)
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
+        }
+        contentContainer.addView(scroll)
+        mainLayout.addView(contentContainer)
+
+        // Bottom Button "Tambah Resep" pinned to the very bottom
+        val bottomBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(16))
+            setBackgroundColor(Color.WHITE)
+            elevation = dp(4).toFloat()
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+        }
+        val btnAddRecipe = MaterialButton(context).apply {
+            text = "Tambah Resep"
+            isAllCaps = false
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(GREEN)
+            cornerRadius = dp(10)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(52))
+        }
+        bottomBar.addView(btnAddRecipe)
+        mainLayout.addView(bottomBar)
+
+        val dialog = MaterialAlertDialogBuilder(context, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen)
+            .setView(mainLayout)
+            .create()
+
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+
+        btnBack.setOnClickListener { dialog.dismiss() }
+
+        btnAddRecipe.setOnClickListener {
+            dialog.dismiss()
+            loadProductsAndOpenRecipeSelector()
+        }
+
+        fun populateRecipes(query: String) {
+            listLayout.removeAllViews()
+            lifecycleScope.launch {
+                val products = withContext(Dispatchers.IO) {
+                    AppDatabase.getDatabase(context).productDao().getAllProducts().first()
+                }
+                val recipesByProduct = IngredientInventoryStore.recipes(context).groupBy { it.productName }
+
+                val filteredProducts = products.filter { recipesByProduct.containsKey(it.name) && it.name.contains(query, true) }
+
+                withContext(Dispatchers.Main) {
+                    if (filteredProducts.isEmpty()) {
+                        listLayout.addView(TextView(context).apply {
+                            text = if (query.isBlank()) "Belum ada resep produk. Klik 'Tambah Resep' di bawah." else "Tidak ada resep ditemukan"
+                            textSize = 14f
+                            setTextColor(MUTED)
+                            setPadding(dp(16), dp(32), dp(16), dp(32))
+                            gravity = Gravity.CENTER
+                        })
+                    } else {
+                        val card = com.google.android.material.card.MaterialCardView(context).apply {
+                            radius = dp(14).toFloat()
+                            cardElevation = 0f
+                            strokeWidth = dp(1)
+                            strokeColor = 0xFFE0E0E0.toInt()
+                            setCardBackgroundColor(Color.WHITE)
+                            layoutParams = LinearLayout.LayoutParams(-1, -2)
+                        }
+                        val cardContent = LinearLayout(context).apply {
+                            orientation = LinearLayout.VERTICAL
+                        }
+
+                        filteredProducts.forEachIndexed { index, product ->
+                            val count = recipesByProduct[product.name]?.size ?: 0
+                            val row = LinearLayout(context).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.CENTER_VERTICAL
+                                setPadding(dp(18), dp(15), dp(16), dp(15))
+                                minimumHeight = dp(72)
+                                isClickable = true
+                                isFocusable = true
+                                setOnClickListener {
+                                    dialog.dismiss()
+                                    showMultiIngredientRecipeEditor(product, IngredientInventoryStore.ingredients(context))
+                                }
+                            }
+
+                            // Product Name (Clean list without photo or initials badge)
+                            row.addView(TextView(context).apply {
+                                text = product.name
+                                textSize = 15f
+                                setTypeface(typeface, Typeface.BOLD)
+                                setTextColor(0xFF26332C.toInt())
+                                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                            })
+
+                            val rightContainer = LinearLayout(context).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.CENTER_VERTICAL
+                            }
+                            rightContainer.addView(TextView(context).apply {
+                                text = "$count bahan baku"
+                                textSize = 13f
+                                setTextColor(MUTED)
+                                setPadding(0, 0, dp(8), 0)
+                            })
+                            rightContainer.addView(TextView(context).apply {
+                                text = "›"
+                                textSize = 28f
+                                setTextColor(GREEN)
+                            })
+                            row.addView(rightContainer)
+
+                            cardContent.addView(row)
+
+                            if (index < filteredProducts.lastIndex) {
+                                cardContent.addView(View(context).apply {
+                                    setBackgroundColor(0xFFE0E0E0.toInt())
+                                    layoutParams = LinearLayout.LayoutParams(-1, dp(1)).apply {
+                                        marginStart = dp(18)
+                                        marginEnd = dp(18)
+                                    }
+                                })
+                            }
+                        }
+
+                        card.addView(cardContent)
+                        listLayout.addView(card)
+                    }
+                }
+            }
+        }
+
+        searchInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                populateRecipes(s?.toString().orEmpty())
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        populateRecipes("")
+        dialog.show()
+    }
+
+    private fun loadProductsAndOpenRecipeSelector() {
+        lifecycleScope.launch {
+            val products = withContext(Dispatchers.IO) {
+                AppDatabase.getDatabase(requireContext()).productDao().getAllProducts().first()
+            }
+            val context = requireContext()
+            if (products.isEmpty()) {
+                MaterialAlertDialogBuilder(context)
+                    .setTitle("Belum ada produk")
+                    .setMessage("Silakan tambah produk terlebih dahulu untuk membuat resep.")
+                    .setPositiveButton("OK", null)
+                    .show()
+                return@launch
+            }
+            showSelectProductDialog(products)
+        }
+    }
+
+    private fun showSelectProductDialog(products: List<Product>) {
+        val context = requireContext()
+        val ingredients = IngredientInventoryStore.ingredients(context)
+        if (ingredients.isEmpty()) {
+            Toast.makeText(context, "Tambahkan bahan baku terlebih dahulu sebelum membuat resep.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Custom Title Header (Theme Green background, White text) with Close (X) button on top right
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+
+        val textLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        textLayout.addView(TextView(context).apply {
+            text = "Pilih Produk"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        textLayout.addView(TextView(context).apply {
+            text = "Pilih produk yang ingin ditambahkan resep."
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        titleBar.addView(textLayout)
+
+        val dialogRef = arrayOfNulls<androidx.appcompat.app.AlertDialog>(1)
+
+        val closeBtn = TextView(context).apply {
+            text = "✕"
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                dialogRef[0]?.dismiss()
+            }
+        }
+        titleBar.addView(closeBtn)
+        mainLayout.addView(titleBar)
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+
+        val searchInput = EditText(context).apply {
+            hint = "Cari Produk"
+            textSize = 14f
+            setSingleLine(true)
+            background = null
+        }
+        val searchLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            layoutParams = android.widget.FrameLayout.LayoutParams(-1, -1)
+        }
+        searchLayout.addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_search)
+            imageTintList = ColorStateList.valueOf(MUTED)
+            layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { marginEnd = dp(8) }
+        })
+        searchLayout.addView(searchInput, LinearLayout.LayoutParams(0, -1, 1f))
+
+        val searchCard = com.google.android.material.card.MaterialCardView(context).apply {
+            radius = dp(10).toFloat()
+            cardElevation = 0f
+            strokeWidth = dp(1)
+            strokeColor = 0xFFE0E0E0.toInt()
+            setCardBackgroundColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(12) }
+            addView(searchLayout)
+        }
+        container.addView(searchCard)
+
+        val listLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val scroll = ScrollView(context).apply {
+            addView(listLayout)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(360))
+        }
+        container.addView(scroll)
+        mainLayout.addView(container)
+
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .create()
+        dialogRef[0] = dialog
+
+        fun populateList(query: String) {
+            listLayout.removeAllViews()
+            val filtered = products.filter { it.name.contains(query, true) }.sortedBy { it.name.lowercase() }
+            if (filtered.isEmpty()) {
+                listLayout.addView(TextView(context).apply {
+                    text = "Tidak ada produk ditemukan"
+                    textSize = 14f
+                    setTextColor(MUTED)
+                    setPadding(dp(16), dp(20), dp(16), dp(20))
+                })
+            } else {
+                filtered.forEach { product ->
+                    val row = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(16), dp(12), dp(16), dp(12))
+                        isClickable = true
+                        isFocusable = true
+                        setOnClickListener {
+                            dialog.dismiss()
+                            showMultiIngredientRecipeEditor(product, ingredients)
+                        }
+                    }
+
+                    row.addView(TextView(context).apply {
+                        text = product.name
+                        textSize = 15f
+                        setTypeface(typeface, Typeface.BOLD)
+                        setTextColor(0xFF26332C.toInt())
+                        layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                    })
+
+                    listLayout.addView(row)
+                    listLayout.addView(View(context).apply {
+                        setBackgroundColor(0xFFE0E0E0.toInt())
+                        layoutParams = LinearLayout.LayoutParams(-1, dp(1)).apply { marginStart = dp(16); marginEnd = dp(16) }
+                    })
+                }
+            }
+        }
+
+        searchInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                populateList(s?.toString().orEmpty())
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        populateList("")
+        dialog.show()
+    }
+
+    private class RecipeItemRow(
+        val ingredient: IngredientRecord,
+        val qtyEdit: EditText,
+        val unitSpinner: Spinner,
+        val containerView: View
+    )
+
+    private fun showMultiIngredientRecipeEditor(product: Product, ingredients: List<IngredientRecord>) {
+        val context = requireContext()
+        val existingRecipes = IngredientInventoryStore.recipes(context).filter { it.productName.equals(product.name, true) }
+        val ingredientMap = ingredients.associateBy { it.id }
+
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Custom Title Header (Theme Green background, White text)
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        titleBar.addView(TextView(context).apply {
+            text = "Tambah Resep"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        titleBar.addView(TextView(context).apply {
+            text = product.name
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            setPadding(0, dp(2), 0, 0)
+        })
+        mainLayout.addView(titleBar)
+
+        val formContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+        }
+
+        formContainer.addView(TextView(context).apply {
+            text = "Bahan Baku"
+            textSize = 16f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(0xFF26332C.toInt())
+        })
+        formContainer.addView(TextView(context).apply {
+            text = "Tambah bahan baku yang dibutuhkan untuk menghasilkan satu produk."
+            textSize = 12f
+            setTextColor(MUTED)
+            setPadding(0, dp(2), 0, dp(12))
+        })
+
+        val itemsLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        val recipeRows = mutableListOf<RecipeItemRow>()
+
+        fun addRow(ing: IngredientRecord, initialQty: Double = 1.0, selectedUnit: String = ing.baseUnit) {
+            val rowCard = com.google.android.material.card.MaterialCardView(context).apply {
+                radius = dp(10).toFloat()
+                cardElevation = 0f
+                strokeWidth = dp(1)
+                strokeColor = 0xFFE0E0E0.toInt()
+                setCardBackgroundColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) }
+            }
+
+            val rowContent = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+            }
+
+            // Top Row: Ingredient Name (Bold)
+            rowContent.addView(TextView(context).apply {
+                text = ing.name
+                textSize = 15f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(0xFF26332C.toInt())
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) }
+            })
+
+            // Bottom Row: Compact Quantity Input + Expanded Unit Spinner + Remove Button (X)
+            val inputRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+            val takaranInput = EditText(context).apply {
+                hint = "1"
+                setText(if (initialQty > 0) number(initialQty) else "")
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                textSize = 14f
+                setSingleLine(true)
+                gravity = Gravity.CENTER
+                filters = arrayOf(android.text.InputFilter.LengthFilter(6))
+                layoutParams = LinearLayout.LayoutParams(dp(64), dp(40)).apply { marginEnd = dp(8) }
+            }
+            inputRow.addView(takaranInput)
+
+            val unitSpinner = Spinner(context).apply {
+                val unitNames = ing.units.map { it.name }
+                adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, unitNames)
+                val unitIdx = unitNames.indexOfFirst { it.equals(selectedUnit, true) }
+                if (unitIdx >= 0) setSelection(unitIdx)
+                layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginEnd = dp(8) }
+            }
+            inputRow.addView(unitSpinner)
+
+            val btnRemove = TextView(context).apply {
+                text = "✕"
+                textSize = 18f
+                setTextColor(0xFFC62828.toInt())
+                setPadding(dp(6), dp(4), dp(6), dp(4))
+                isClickable = true
+                isFocusable = true
+            }
+            inputRow.addView(btnRemove)
+
+            rowContent.addView(inputRow)
+            rowCard.addView(rowContent)
+
+            val itemRow = RecipeItemRow(ing, takaranInput, unitSpinner, rowCard)
+            recipeRows.add(itemRow)
+
+            btnRemove.setOnClickListener {
+                itemsLayout.removeView(rowCard)
+                recipeRows.remove(itemRow)
+            }
+
+            itemsLayout.addView(rowCard)
+        }
+
+        if (existingRecipes.isNotEmpty()) {
+            existingRecipes.forEach { rec ->
+                ingredientMap[rec.ingredientId]?.let { ing ->
+                    addRow(ing, rec.quantity, rec.unit)
+                }
+            }
+        }
+
+        formContainer.addView(itemsLayout)
+
+        val btnAddBahan = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "+ Tambah Bahan Baku"
+            isAllCaps = false
+            setTextColor(GREEN)
+            strokeColor = ColorStateList.valueOf(GREEN)
+            cornerRadius = dp(8)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(4); bottomMargin = dp(16) }
+            setOnClickListener {
+                val mainLayout = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                }
+
+                // Custom Title Header (Theme Green background, White text)
+                val titleBar = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setBackgroundColor(GREEN)
+                    setPadding(dp(24), dp(18), dp(24), dp(18))
+                }
+                titleBar.addView(TextView(context).apply {
+                    text = "Pilih Bahan Baku"
+                    textSize = 18f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(Color.WHITE)
+                })
+                titleBar.addView(TextView(context).apply {
+                    text = "Pilih bahan baku untuk resep menu ini"
+                    textSize = 12f
+                    setTextColor(0xFFE0F2F1.toInt())
+                    setPadding(0, dp(2), 0, 0)
+                })
+                mainLayout.addView(titleBar)
+
+                val contentContainer = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(16), dp(12), dp(16), dp(12))
+                }
+
+                // Category filter chips
+                val chipGroup = com.google.android.material.chip.ChipGroup(context).apply {
+                    isSingleSelection = true
+                    isSingleLine = true
+                }
+                val chipScroll = HorizontalScrollView(context).apply {
+                    addView(chipGroup)
+                    isHorizontalScrollBarEnabled = false
+                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) }
+                }
+                contentContainer.addView(chipScroll)
+
+                val itemsLayout = LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                }
+                val checkboxes = mutableListOf<Pair<IngredientRecord, android.widget.CheckBox>>()
+
+                val selectScroll = ScrollView(context).apply {
+                    addView(itemsLayout)
+                    layoutParams = LinearLayout.LayoutParams(-1, dp(300))
+                }
+                contentContainer.addView(selectScroll)
+                mainLayout.addView(contentContainer)
+
+                val selectDialog = MaterialAlertDialogBuilder(context)
+                    .setView(mainLayout)
+                    .setNegativeButton("Batal", null)
+                    .setPositiveButton("Pilih", null)
+                    .create()
+
+                fun populateCheckboxes(catFilter: String) {
+                    itemsLayout.removeAllViews()
+                    chipGroup.removeAllViews()
+                    checkboxes.clear()
+
+                    val sortedIngredients = ingredients.sortedBy { it.name.lowercase() }
+                    val categories = listOf("Semua") + IngredientInventoryStore.categories(context)
+
+                    categories.forEachIndexed { index, cat ->
+                        val chip = Chip(context).apply {
+                            text = if (index == 0) "Semua (${sortedIngredients.size})" else "$cat (${sortedIngredients.count { it.category.equals(cat, true) }})"
+                            isCheckable = true
+                            isClickable = true
+                            isCheckedIconVisible = false
+                            setEnsureMinTouchTargetSize(false)
+
+                            val states = arrayOf(
+                                intArrayOf(android.R.attr.state_checked),
+                                intArrayOf(-android.R.attr.state_checked)
+                            )
+                            chipBackgroundColor = ColorStateList(
+                                states,
+                                intArrayOf(0xFF008F89.toInt(), 0xFFE9ECE9.toInt())
+                            )
+                            chipStrokeColor = ColorStateList(
+                                states,
+                                intArrayOf(0xFF00796B.toInt(), 0xFFD5DED8.toInt())
+                            )
+                            chipStrokeWidth = dp(1).toFloat()
+                            setTextColor(
+                                ColorStateList(
+                                    states,
+                                    intArrayOf(Color.WHITE, 0xFF34423B.toInt())
+                                )
+                            )
+                            isChecked = cat.equals(catFilter, true) || (index == 0 && catFilter == "Semua")
+                            setOnClickListener {
+                                populateCheckboxes(cat)
+                            }
+                        }
+                        chipGroup.addView(chip)
+                    }
+
+                    val filtered = sortedIngredients.filter { ing ->
+                        catFilter == "Semua" || ing.category.equals(catFilter, true)
+                    }
+
+                    if (filtered.isEmpty()) {
+                        itemsLayout.addView(TextView(context).apply {
+                            text = "Tidak ada bahan dalam kategori ini"
+                            textSize = 14f
+                            setTextColor(MUTED)
+                            setPadding(dp(16), dp(20), dp(16), dp(20))
+                            gravity = Gravity.CENTER
+                        })
+                    } else {
+                        filtered.forEach { ing ->
+                            val alreadyAdded = recipeRows.any { it.ingredient.id == ing.id }
+                            val cb = android.widget.CheckBox(context).apply {
+                                text = if (alreadyAdded) "${ing.name} (Sudah ditambahkan)" else ing.name
+                                textSize = 14f
+                                setTextColor(if (alreadyAdded) MUTED else 0xFF26332C.toInt())
+                                isChecked = false
+                                isEnabled = !alreadyAdded
+                                setPadding(0, dp(8), 0, dp(8))
+                            }
+                            checkboxes.add(ing to cb)
+                            itemsLayout.addView(cb)
+                        }
+                    }
+                }
+
+                populateCheckboxes("Semua")
+
+                selectDialog.setOnShowListener {
+                    selectDialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val selected = checkboxes.filter { it.second.isChecked }.map { it.first }
+                        if (selected.isEmpty()) {
+                            Toast.makeText(context, "Pilih minimal satu bahan baku", Toast.LENGTH_SHORT).show()
+                            return@setOnClickListener
+                        }
+                        selected.forEach { ing ->
+                            if (recipeRows.none { it.ingredient.id == ing.id }) {
+                                addRow(ing, 1.0, ing.baseUnit)
+                            }
+                        }
+                        selectDialog.dismiss()
+                    }
+                }
+                selectDialog.show()
+            }
+        }
+        formContainer.addView(btnAddBahan)
+
+        val scroll = ScrollView(context).apply {
+            addView(formContainer)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(400))
+        }
+        mainLayout.addView(scroll)
+
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Simpan", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (recipeRows.isEmpty()) {
+                    Toast.makeText(context, "Tambahkan minimal 1 bahan baku", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                for (row in recipeRows) {
+                    val qty = row.qtyEdit.text.toString().trim().replace(',', '.').toDoubleOrNull()
+                    if (qty == null || qty <= 0) {
+                        row.qtyEdit.error = "Takaran valid diperlukan"
+                        Toast.makeText(context, "Periksa kembali takaran bahan", Toast.LENGTH_SHORT).show()
+                        return@setOnClickListener
+                    }
+                }
+
+                existingRecipes.forEach { oldRec ->
+                    IngredientInventoryStore.removeRecipe(context, product.name, oldRec.ingredientId)
+                }
+
+                recipeRows.forEach { row ->
+                    val qty = row.qtyEdit.text.toString().trim().replace(',', '.').toDoubleOrNull() ?: 1.0
+                    val unit = row.unitSpinner.selectedItem?.toString() ?: row.ingredient.baseUnit
+                    IngredientInventoryStore.saveRecipe(
+                        context,
+                        RecipeRecord(product.name, row.ingredient.id, qty, unit)
+                    )
+                }
+
+                Toast.makeText(context, "Resep ${product.name} berhasil disimpan!", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                refreshInventory()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun roundedBg(color: Int, radius: Float): android.graphics.drawable.GradientDrawable {
+        return android.graphics.drawable.GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = radius
+        }
+    }
+
+    private fun printStockReport(category: String, items: List<IngredientRecord>) {
+        val context = requireContext()
+        val printers = BluetoothPrinterStore.all(context).filter { it.purpose == "Struk" || it.purpose == "Laporan" }
+        val printer = printers.firstOrNull { it.isDefault } ?: printers.firstOrNull()
+        if (printer == null) {
+            Toast.makeText(context, "Printer ESC/POS belum terdaftar. Atur di Pengaturan Printer.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val lines = buildList {
+            add("LAPORAN STOK · $category")
+            add("Waktu: " + java.text.SimpleDateFormat("EEEE, dd/MM/yyyy HH:mm", Locale("id", "ID")).format(Date()))
+            add("--------------------------------")
+            items.sortedBy { it.name }.forEach { item ->
+                val amount = item.stockInBase
+                val min = item.minimumInBase
+                val unitName = item.baseUnit
+                add(item.name)
+                add("Stok: ${number(amount)} $unitName | Min: ${number(min)} $unitName")
+                if (item.stockInBase <= item.minimumInBase) add("  ** PERLU RESTOCK **")
+                add("--------------------------------")
+            }
+            add("Total: ${items.size} bahan")
+        }
+        lifecycleScope.launch {
+            BluetoothPrintService.printLines(context, printer, lines)
+                .onSuccess { Toast.makeText(context, "Laporan dicetak ke ${printer.name}.", Toast.LENGTH_SHORT).show() }
+                .onFailure { error -> Toast.makeText(context, "Gagal mencetak: ${error.localizedMessage ?: "Periksa koneksi printer"}", Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    private fun generateStockReportPdf(context: android.content.Context, category: String, items: List<IngredientRecord>): File? {
+        try {
+            val profile = CompanySettings.getProfile(context)
+            val outletName = profile.name.ifBlank { "Sarimanah" }
+
+            val pdfDocument = android.graphics.pdf.PdfDocument()
+            val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas = page.canvas
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.BLACK
+                textSize = 11f
+            }
+            val headerPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.BLACK
+                textSize = 12f
+                isFakeBoldText = true
+            }
+            val titlePaint = android.graphics.Paint().apply {
+                color = 0xFF008F89.toInt()
+                textSize = 18f
+                isFakeBoldText = true
+            }
+
+            var y = 40f
+            canvas.drawText("Outlet : $outletName", 40f, y, headerPaint)
+            y += 22f
+            canvas.drawText("LAPORAN STOK · $category", 40f, y, titlePaint)
+            y += 24f
+            paint.textSize = 11f
+            canvas.drawText("Waktu: " + java.text.SimpleDateFormat("EEEE, dd/MM/yyyy HH:mm", Locale("id", "ID")).format(Date()), 40f, y, paint)
+            y += 20f
+            canvas.drawText("------------------------------------------------------------------------------------------------------------------------", 40f, y, paint)
+            y += 20f
+
+            // Table Header 3 columns
+            canvas.drawText("Bahan", 40f, y, headerPaint)
+            canvas.drawText("Stok Saat Ini", 320f, y, headerPaint)
+            canvas.drawText("Stok Minimal", 450f, y, headerPaint)
+            y += 18f
+            canvas.drawText("------------------------------------------------------------------------------------------------------------------------", 40f, y, paint)
+            y += 20f
+
+            items.sortedBy { it.name }.forEach { item ->
+                if (y > 780f) return@forEach
+                val amount = item.stockInBase
+                val min = item.minimumInBase
+                val unitName = item.baseUnit
+                val status = if (item.stockInBase <= item.minimumInBase) " [RESTOCK]" else ""
+
+                canvas.drawText(item.name, 40f, y, paint)
+                canvas.drawText("${number(amount)} $unitName", 320f, y, paint)
+                canvas.drawText("${number(min)} $unitName$status", 450f, y, paint)
+                y += 20f
+            }
+
+            y += 10f
+            canvas.drawText("------------------------------------------------------------------------------------------------------------------------", 40f, y, paint)
+            y += 20f
+            canvas.drawText("Total: ${items.size} bahan", 40f, y, paint)
+
+            pdfDocument.finishPage(page)
+
+            val file = File(context.cacheDir, "Laporan_Stok_${category.replace(" ", "_")}.pdf")
+            pdfDocument.writeTo(java.io.FileOutputStream(file))
+            pdfDocument.close()
+            return file
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
+    private fun showShareOptionsDialog(category: String, items: List<IngredientRecord>) {
+        val context = requireContext()
+        val mainLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        // Custom Title Header (Theme Green background, White text)
+        val titleBar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(GREEN)
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+        }
+        titleBar.addView(TextView(context).apply {
+            text = "Kirim Laporan Stok"
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+        })
+        titleBar.addView(TextView(context).apply {
+            text = "Pilih metode pengiriman laporan"
+            textSize = 12f
+            setTextColor(0xFFE0F2F1.toInt())
+            setPadding(0, dp(2), 0, 0)
+        })
+        mainLayout.addView(titleBar)
+
+        val optionsContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+
+        val btnWa = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "WhatsApp"
+            isAllCaps = false
+            textSize = 14f
+            setTextColor(GREEN)
+            strokeColor = ColorStateList.valueOf(GREEN)
+            cornerRadius = dp(8)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(12) }
+        }
+
+        val btnEmail = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Email (PDF)"
+            isAllCaps = false
+            textSize = 14f
+            setTextColor(GREEN)
+            strokeColor = ColorStateList.valueOf(GREEN)
+            cornerRadius = dp(8)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(48))
+        }
+
+        optionsContainer.addView(btnWa)
+        optionsContainer.addView(btnEmail)
+        mainLayout.addView(optionsContainer)
+
+        val dialog = MaterialAlertDialogBuilder(context)
+            .setView(mainLayout)
+            .setNegativeButton("Batal", null)
+            .create()
+
+        btnWa.setOnClickListener {
+            dialog.dismiss()
+            val reportText = buildList {
+                add("*LAPORAN STOK · $category*")
+                add("Waktu: " + java.text.SimpleDateFormat("EEEE, dd/MM/yyyy HH:mm", Locale("id", "ID")).format(Date()))
+                add("")
+                items.sortedBy { it.name }.forEach { item ->
+                    val amount = item.stockInBase
+                    val min = item.minimumInBase
+                    val unitName = item.baseUnit
+                    val status = if (item.stockInBase <= item.minimumInBase) " ⚠️ (RESTOCK)" else ""
+                    add("• *${item.name}* : ${number(amount)} $unitName (Min: ${number(min)} $unitName)$status")
+                }
+                add("")
+                add("Total: ${items.size} bahan")
+            }.joinToString("\n")
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                data = android.net.Uri.parse("https://api.whatsapp.com/send?text=${android.net.Uri.encode(reportText)}")
+            }
+            try {
+                context.startActivity(intent)
+            } catch (ex: Exception) {
+                Toast.makeText(context, "WhatsApp tidak terpasang.", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnEmail.setOnClickListener {
+            dialog.dismiss()
+            val pdfFile = generateStockReportPdf(context, category, items)
+            if (pdfFile == null) {
+                Toast.makeText(context, "Gagal membuat dokumen PDF.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            try {
+                val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", pdfFile)
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/pdf"
+                    putExtra(Intent.EXTRA_SUBJECT, "Laporan Stok · $category")
+                    putExtra(Intent.EXTRA_TEXT, "Terlampir Laporan Stok untuk kategori $category.")
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(Intent.createChooser(intent, "Kirim Email PDF"))
+            } catch (ex: Exception) {
+                Toast.makeText(context, "Gagal melampirkan PDF: ${ex.localizedMessage}", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun confirmDelete(item: IngredientRecord) {
+        MaterialAlertDialogBuilder(requireContext()).setTitle("Hapus ${item.name}?")
+            .setMessage("Bahan ini juga akan dihapus dari resep menu.")
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Hapus") { _, _ ->
+                IngredientInventoryStore.deleteIngredient(requireContext(), item.id); refreshInventory()
+            }.show()
+    }
+
+    private fun parseUnits(text: String): List<UnitDefinition>? {
+        val result = mutableListOf<UnitDefinition>()
+        text.split(",", ";", "\n").map { it.trim() }.filter { it.isNotBlank() }.forEach {
+            val pair = it.split("=")
+            if (pair.size != 2) return null
+            val factor = pair[1].trim().replace(',', '.').toDoubleOrNull() ?: return null
+            val unitName = pair[0].trim()
+            if (unitName.isBlank() || factor <= 0 || result.any { entry -> entry.name.equals(unitName, true) }) return null
+            result += UnitDefinition(unitName, factor)
+        }
+        return result.takeIf { it.isNotEmpty() }
+    }
+
+    private fun form() = LinearLayout(requireContext()).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(8)) }
+    private fun field(title: String, input: EditText) = TextInputLayout(requireContext()).apply {
+        hint = title; boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE; boxStrokeColor = GREEN
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(9) }; addView(input)
+    }
+    private fun input(hint: String, value: String, decimal: Boolean = false) = EditText(requireContext()).apply {
+        setText(value); contentDescription = hint; setSingleLine(true)
+        inputType = if (decimal) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL else InputType.TYPE_CLASS_TEXT
+    }
+    private fun label(value: String) = TextView(requireContext()).apply { text = value; textSize = 13f; setTextColor(MUTED); setPadding(0, dp(4), 0, dp(5)) }
+    private fun spinner(values: List<String>) = Spinner(requireContext()).apply {
+        adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, values)
+        layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) }
+    }
+    private fun numeric(edit: EditText) = edit.text.toString().trim().replace(',', '.').toDoubleOrNull()
+    private fun number(value: Double) = if (value % 1.0 == 0.0) value.toLong().toString() else String.format(Locale.US, "%.3f", value).trimEnd('0').trimEnd('.')
+    private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    override fun onDestroyView() { _binding = null; super.onDestroyView() }
+
+    companion object {
+        private const val GREEN = 0xFF008F89.toInt()
+        private const val MUTED = 0xFF707A74.toInt()
+    }
+}
