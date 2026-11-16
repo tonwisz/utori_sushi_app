@@ -87,16 +87,29 @@ function updateFirestoreStatusUI(connected: boolean, message: string) {
   }
 }
 
+function sanitizeDocId(rawId: unknown, prefix = "item", idx = 0): string {
+  if (rawId !== undefined && rawId !== null) {
+    const cleaned = String(rawId).trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (cleaned.length > 0) return cleaned.slice(0, 128);
+  }
+  return `${prefix}-${Date.now()}-${idx}`;
+}
+
+function cleanPayload<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj));
+}
+
 /**
  * SINKRONISASI DATA KE CLOUD FIRESTORE
  */
 export async function syncConfigToFirestore(configData: any) {
   const path = 'settings/store_config';
   try {
-    await setDoc(doc(db, 'settings', 'store_config'), {
+    if (!configData || typeof configData !== 'object') return;
+    await setDoc(doc(db, 'settings', 'store_config'), cleanPayload({
       ...configData,
       updatedAt: new Date().toISOString()
-    });
+    }));
     console.log("Config saved to Firestore successfully");
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
@@ -106,8 +119,12 @@ export async function syncConfigToFirestore(configData: any) {
 export async function syncCategoriesToFirestore(categories: any[]) {
   const path = 'categories';
   try {
-    for (const cat of categories) {
-      await setDoc(doc(db, 'categories', cat.id), cat);
+    if (!Array.isArray(categories)) return;
+    for (let i = 0; i < categories.length; i++) {
+      const cat = categories[i];
+      if (!cat || typeof cat !== 'object') continue;
+      const docId = sanitizeDocId(cat.id, 'cat', i);
+      await setDoc(doc(db, 'categories', docId), cleanPayload({ ...cat, id: docId, sortIndex: i }));
     }
     console.log("Categories saved to Firestore");
   } catch (err) {
@@ -118,8 +135,12 @@ export async function syncCategoriesToFirestore(categories: any[]) {
 export async function syncProductsToFirestore(products: any[]) {
   const path = 'products';
   try {
-    for (const prod of products) {
-      await setDoc(doc(db, 'products', prod.id), prod);
+    if (!Array.isArray(products)) return;
+    for (let i = 0; i < products.length; i++) {
+      const prod = products[i];
+      if (!prod || typeof prod !== 'object') continue;
+      const docId = sanitizeDocId(prod.id, 'prod', i);
+      await setDoc(doc(db, 'products', docId), cleanPayload({ ...prod, id: docId, sortIndex: i }));
     }
     console.log("Products saved to Firestore");
   } catch (err) {
@@ -128,10 +149,12 @@ export async function syncProductsToFirestore(products: any[]) {
 }
 
 export async function syncSingleProductToFirestore(product: any) {
-  const path = `products/${product.id}`;
+  const docId = sanitizeDocId(product?.id, 'prod', 0);
+  const path = `products/${docId}`;
   try {
-    await setDoc(doc(db, 'products', product.id), product, { merge: true });
-    console.log(`Product ${product.id} synced directly to Firestore`);
+    if (!product || typeof product !== 'object') return;
+    await setDoc(doc(db, 'products', docId), cleanPayload({ ...product, id: docId }), { merge: true });
+    console.log(`Product ${docId} synced directly to Firestore`);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
   }
@@ -140,8 +163,12 @@ export async function syncSingleProductToFirestore(product: any) {
 export async function syncExtrasToFirestore(extras: any[]) {
   const path = 'extras';
   try {
-    for (const ext of extras) {
-      await setDoc(doc(db, 'extras', ext.id), ext);
+    if (!Array.isArray(extras)) return;
+    for (let i = 0; i < extras.length; i++) {
+      const ext = extras[i];
+      if (!ext || typeof ext !== 'object') continue;
+      const docId = sanitizeDocId(ext.id, 'ext', i);
+      await setDoc(doc(db, 'extras', docId), cleanPayload({ ...ext, id: docId, sortIndex: i }));
     }
     console.log("Extras saved to Firestore");
   } catch (err) {
@@ -152,8 +179,12 @@ export async function syncExtrasToFirestore(extras: any[]) {
 export async function syncPackagesToFirestore(packages: any[]) {
   const path = 'packages';
   try {
-    for (const pkg of packages) {
-      await setDoc(doc(db, 'packages', pkg.id), pkg);
+    if (!Array.isArray(packages)) return;
+    for (let i = 0; i < packages.length; i++) {
+      const pkg = packages[i];
+      if (!pkg || typeof pkg !== 'object') continue;
+      const docId = sanitizeDocId(pkg.id, 'pkg', i);
+      await setDoc(doc(db, 'packages', docId), cleanPayload({ ...pkg, id: docId, sortIndex: i }));
     }
     console.log("Packages saved to Firestore");
   } catch (err) {
@@ -162,10 +193,11 @@ export async function syncPackagesToFirestore(packages: any[]) {
 }
 
 export async function deletePackageFromFirestore(pkgId: string) {
-  const path = `packages/${pkgId}`;
+  const docId = sanitizeDocId(pkgId, 'pkg', 0);
+  const path = `packages/${docId}`;
   try {
-    await deleteDoc(doc(db, 'packages', pkgId));
-    console.log(`Package ${pkgId} deleted from Firestore`);
+    await deleteDoc(doc(db, 'packages', docId));
+    console.log(`Package ${docId} deleted from Firestore`);
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, path);
   }

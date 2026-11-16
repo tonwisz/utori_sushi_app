@@ -44,6 +44,18 @@
       ? getFirestore(app, firebaseConfig.firestoreDatabaseId) 
       : getFirestore(app);
 
+    function sanitizeDocId(rawId, prefix = "item", idx = 0) {
+      if (rawId !== undefined && rawId !== null) {
+        const cleaned = String(rawId).trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+        if (cleaned.length > 0) return cleaned.slice(0, 128);
+      }
+      return `${prefix}-${Date.now()}-${idx}`;
+    }
+
+    function cleanFirestorePayload(obj) {
+      return JSON.parse(JSON.stringify(obj));
+    }
+
     window.FirestoreSync = {
       db,
       app,
@@ -51,49 +63,88 @@
       databaseId: firebaseConfig.firestoreDatabaseId || "(default)",
       async syncConfigToFirestore(cfg) {
         try {
-          await setDoc(doc(db, 'settings', 'store_config'), { ...cfg, updatedAt: new Date().toISOString() });
+          if (!cfg || typeof cfg !== "object") return;
+          await setDoc(doc(db, 'settings', 'store_config'), cleanFirestorePayload({ ...cfg, updatedAt: new Date().toISOString() }));
         } catch(e) { console.error("Error syncConfigToFirestore:", e); }
       },
       async syncCategoriesToFirestore(cats) {
         try {
+          if (!Array.isArray(cats)) return;
           for (let i = 0; i < cats.length; i++) {
-            await setDoc(doc(db, 'categories', cats[i].id), { ...cats[i], sortIndex: i });
+            const item = cats[i];
+            if (!item || typeof item !== "object") continue;
+            const docId = sanitizeDocId(item.id, "cat", i);
+            await setDoc(doc(db, 'categories', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
           }
         } catch(e) { console.error("Error syncCategoriesToFirestore:", e); }
       },
       async syncProductsToFirestore(prods) {
         try {
+          if (!Array.isArray(prods)) return;
           for (let i = 0; i < prods.length; i++) {
-            await setDoc(doc(db, 'products', prods[i].id), { ...prods[i], sortIndex: i });
+            const item = prods[i];
+            if (!item || typeof item !== "object") continue;
+            const docId = sanitizeDocId(item.id, "prod", i);
+            await setDoc(doc(db, 'products', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
           }
         } catch(e) { console.error("Error syncProductsToFirestore:", e); }
       },
       async syncSingleProductToFirestore(p) {
         try {
-          await setDoc(doc(db, 'products', p.id), p, { merge: true });
+          if (!p || typeof p !== "object") return;
+          const docId = sanitizeDocId(p.id, "prod", 0);
+          await setDoc(doc(db, 'products', docId), cleanFirestorePayload({ ...p, id: docId }), { merge: true });
         } catch(e) { console.error("Error syncSingleProductToFirestore:", e); }
       },
       async deleteProductFromFirestore(id) {
         try {
-          await deleteDoc(doc(db, 'products', id));
+          if (id === undefined || id === null || id === "") return;
+          const docId = sanitizeDocId(id, "prod", 0);
+          await deleteDoc(doc(db, 'products', docId));
         } catch(e) { console.error("Error deleteProductFromFirestore:", e); }
       },
       async deleteCategoryFromFirestore(id) {
         try {
-          await deleteDoc(doc(db, 'categories', id));
+          if (id === undefined || id === null || id === "") return;
+          const docId = sanitizeDocId(id, "cat", 0);
+          await deleteDoc(doc(db, 'categories', docId));
         } catch(e) { console.error("Error deleteCategoryFromFirestore:", e); }
       },
       async syncExtrasToFirestore(exts) {
         try {
+          if (!Array.isArray(exts)) return;
           for (let i = 0; i < exts.length; i++) {
-            await setDoc(doc(db, 'extras', exts[i].id), { ...exts[i], sortIndex: i });
+            const item = exts[i];
+            if (!item || typeof item !== "object") continue;
+            const docId = sanitizeDocId(item.id, "ext", i);
+            await setDoc(doc(db, 'extras', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
           }
         } catch(e) { console.error("Error syncExtrasToFirestore:", e); }
       },
       async deleteExtraFromFirestore(id) {
         try {
-          await deleteDoc(doc(db, 'extras', id));
+          if (id === undefined || id === null || id === "") return;
+          const docId = sanitizeDocId(id, "ext", 0);
+          await deleteDoc(doc(db, 'extras', docId));
         } catch(e) { console.error("Error deleteExtraFromFirestore:", e); }
+      },
+      async syncPackagesToFirestore(pkgs) {
+        try {
+          if (!Array.isArray(pkgs)) return;
+          for (let i = 0; i < pkgs.length; i++) {
+            const item = pkgs[i];
+            if (!item || typeof item !== "object") continue;
+            const docId = sanitizeDocId(item.id, "pkg", i);
+            await setDoc(doc(db, 'packages', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
+          }
+        } catch(e) { console.error("Error syncPackagesToFirestore:", e); }
+      },
+      async deletePackageFromFirestore(id) {
+        try {
+          if (id === undefined || id === null || id === "") return;
+          const docId = sanitizeDocId(id, "pkg", 0);
+          await deleteDoc(doc(db, 'packages', docId));
+        } catch(e) { console.error("Error deletePackageFromFirestore:", e); }
       }
     };
 
@@ -148,7 +199,10 @@
       onSnapshot(collection(db, 'categories'), (snap) => {
         if (!snap.empty) {
           const list = [];
-          snap.forEach(d => list.push(d.data()));
+          snap.forEach(d => {
+            const data = d.data() || {};
+            list.push({ ...data, id: sanitizeDocId(data.id ?? d.id, "cat", list.length) });
+          });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreCategoriesUpdate) window.onFirestoreCategoriesUpdate(list);
         } else if (window.CATEGORIES && window.CATEGORIES.length > 0) {
@@ -160,7 +214,10 @@
       onSnapshot(collection(db, 'products'), (snap) => {
         if (!snap.empty) {
           const list = [];
-          snap.forEach(d => list.push(d.data()));
+          snap.forEach(d => {
+            const data = d.data() || {};
+            list.push({ ...data, id: sanitizeDocId(data.id ?? d.id, "prod", list.length) });
+          });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreProductsUpdate) window.onFirestoreProductsUpdate(list);
         } else if (window.PRODUCTS && window.PRODUCTS.length > 0) {
@@ -172,7 +229,10 @@
       onSnapshot(collection(db, 'extras'), (snap) => {
         if (!snap.empty) {
           const list = [];
-          snap.forEach(d => list.push(d.data()));
+          snap.forEach(d => {
+            const data = d.data() || {};
+            list.push({ ...data, id: sanitizeDocId(data.id ?? d.id, "ext", list.length) });
+          });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreExtrasUpdate) window.onFirestoreExtrasUpdate(list);
         } else if (window.EXTRAS && window.EXTRAS.length > 0) {
@@ -184,7 +244,10 @@
       onSnapshot(collection(db, 'packages'), (snap) => {
         if (!snap.empty) {
           const list = [];
-          snap.forEach(d => list.push(d.data()));
+          snap.forEach(d => {
+            const data = d.data() || {};
+            list.push({ ...data, id: sanitizeDocId(data.id ?? d.id, "pkg", list.length) });
+          });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestorePackagesUpdate) window.onFirestorePackagesUpdate(list);
         } else if (window.PACKAGE_MENUS && window.PACKAGE_MENUS.length > 0) {
@@ -285,7 +348,7 @@
               </span>
             </div>
             <span id="navStoreTagline" class="text-[10px] sm:text-[11px] font-semibold text-stone-500 uppercase tracking-widest -mt-0.5">
-              Sushi & Donburi Bar
+              Sushi, Donburi & Ala Carte
             </span>
           </div>
         </a>
@@ -2355,18 +2418,7 @@
   <!-- ==================== 6. FOOTER ==================== -->
   <footer class="bg-jp-sumi text-stone-400 text-xs py-10 border-t border-stone-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-6 pb-8 border-b border-stone-800">
-        
-        <!-- Col 1: Brand Info -->
-        <div class="space-y-2 md:col-span-1">
-          <div class="flex items-center gap-2 text-white">
-            <span class="text-sm font-serif text-jp-crimson font-black tracking-widest bg-stone-900 border border-stone-800 px-2 py-0.5 rounded">ç¾½é³¥</span>
-            <span id="footerBrandName" class="font-display font-bold text-base text-white">Utori Sushi & Don</span>
-          </div>
-          <p id="footerBrandDesc" class="text-stone-400 text-xs leading-relaxed">
-            Restoran Jepang spesialis Sushi Roll segar, Donburi daging US & katsu kari, serta sajian teh Ocha autentik dari Kyoto.
-          </p>
-        </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pb-8 border-b border-stone-800">
 
         <!-- Col 2: Kategori Menu Dinamis -->
         <div>
@@ -2433,7 +2485,7 @@
      */
     const DEFAULT_CONFIG = {
       restaurantName: "Utori Sushi & Donburi (ç¾½é³¥)",
-      tagline: "Sushi & Donburi Bar",
+      tagline: "Sushi, Donburi & Ala Carte",
       description: "Dibuat dari salmon segar kualitas sashimi Norwegia, beras Koshihikari bertekstur pulen khas Jepang, dan saus racikan autentik. Pilih variasi tingkat kematangan dan es sesuai selera Anda.",
       whatsappNumber: "628170808609",
       address: "Jl. Sarimanah No.28 A, Sarijadi, Sukasari, Kota Bandung, Jawa Barat 40151",
@@ -6840,6 +6892,10 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
             CONFIG.mapsUrl = DEFAULT_CONFIG.mapsUrl;
             saveAdminConfig();
           }
+          if (!CONFIG.tagline || CONFIG.tagline === "Sushi & Donburi Bar") {
+            CONFIG.tagline = "Sushi, Donburi & Ala Carte";
+            saveAdminConfig();
+          }
         }
       } catch (e) {}
     }
@@ -6854,12 +6910,24 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       } catch (e) {}
     }
 
+    function normalizeSafeId(rawId, prefix, idx) {
+      if (rawId !== undefined && rawId !== null) {
+        const cleaned = String(rawId).trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+        if (cleaned.length > 0) return cleaned.slice(0, 128);
+      }
+      return `${prefix}-${Date.now()}-${idx}`;
+    }
+
     function loadAdminCategories() {
       try {
         const saved = localStorage.getItem("shinzan_admin_categories");
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) CATEGORIES = parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            CATEGORIES = parsed
+              .filter(c => c && typeof c === "object")
+              .map((c, idx) => ({ ...c, id: normalizeSafeId(c.id, "cat", idx) }));
+          }
         }
       } catch (e) {}
     }
@@ -6880,12 +6948,20 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            PRODUCTS = parsed;
+            PRODUCTS = parsed.filter(p => p && typeof p === "object");
           }
         }
       } catch (e) {}
 
       let needsSave = false;
+
+      PRODUCTS.forEach((p, idx) => {
+        const safeId = normalizeSafeId(p.id, "jp", idx);
+        if (p.id !== safeId) {
+          p.id = safeId;
+          needsSave = true;
+        }
+      });
 
       const yakinikuItem = PRODUCTS.find(p => p.id === "jp-2" || p.name === "Truffle Gyudon Beef Bowl");
       if (yakinikuItem) {
@@ -6898,9 +6974,10 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
       PRODUCTS.forEach(p => {
         if (!p.options || !Array.isArray(p.options) || p.options.length === 0) {
           const defaultMatch = DEFAULT_PRODUCTS.find(dp => dp.id === p.id);
+          const itemName = (p.name || "").toLowerCase();
           if (defaultMatch && defaultMatch.options) {
             p.options = JSON.parse(JSON.stringify(defaultMatch.options));
-          } else if (p.category === "sushi" || p.name.toLowerCase().includes("roll")) {
+          } else if (p.category === "sushi" || itemName.includes("roll")) {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.sushi));
           } else if (p.category === "minuman") {
             p.options = JSON.parse(JSON.stringify(VARIATION_TEMPLATES.minuman));
@@ -6944,7 +7021,9 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            EXTRAS = parsed;
+            EXTRAS = parsed
+              .filter(e => e && typeof e === "object")
+              .map((e, idx) => ({ ...e, id: normalizeSafeId(e.id, "ext", idx) }));
           }
         }
       } catch (e) {}
@@ -6966,19 +7045,22 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! ðŸ
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            PACKAGE_MENUS = parsed.map(pkg => {
-              const defaultMatch = DEFAULT_PACKAGE_MENUS.find(dp => dp.id === pkg.id);
-              if (!pkg.options || !Array.isArray(pkg.options) || pkg.options.length === 0) {
-                pkg.options = defaultMatch && defaultMatch.options ? JSON.parse(JSON.stringify(defaultMatch.options)) : [
-                  {
-                    name: "Pilihan Minuman Paket",
-                    choices: ["2x Cold Ocha Dingin (Refill)", "2x Hot Ocha Hangat", "1x Cold Ocha + 1x Lemon Ocha (+Rp 3.000)", "Kyoto Matcha Latte (+Rp 5.000)"]
-                  },
-                  {
-                    name: "Level Pedas / Mayo",
-                    choices: ["Pedas Sedang (Normal)", "Tidak Pedas (Mild)", "Ekstra Spicy Mayo (+Rp 2.000)"]
-                  }
-                ];
+            PACKAGE_MENUS = parsed
+              .filter(pkg => pkg && typeof pkg === "object")
+              .map((pkg, idx) => {
+                pkg.id = normalizeSafeId(pkg.id, "pkg", idx);
+                const defaultMatch = DEFAULT_PACKAGE_MENUS.find(dp => dp.id === pkg.id);
+                if (!pkg.options || !Array.isArray(pkg.options) || pkg.options.length === 0) {
+                  pkg.options = defaultMatch && defaultMatch.options ? JSON.parse(JSON.stringify(defaultMatch.options)) : [
+                    {
+                      name: "Pilihan Minuman Paket",
+                      choices: ["2x Cold Ocha Dingin (Refill)", "2x Hot Ocha Hangat", "1x Cold Ocha + 1x Lemon Ocha (+Rp 3.000)", "Kyoto Matcha Latte (+Rp 5.000)"]
+                    },
+                    {
+                      name: "Level Pedas / Mayo",
+                      choices: ["Pedas Sedang (Normal)", "Tidak Pedas (Mild)", "Ekstra Spicy Mayo (+Rp 2.000)"]
+                    }
+                  ];
               }
               return pkg;
             });
