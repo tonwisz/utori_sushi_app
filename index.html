@@ -24,6 +24,7 @@
       doc, 
       setDoc, 
       deleteDoc,
+      getDocs,
       collection, 
       onSnapshot, 
       getDocFromServer 
@@ -70,27 +71,43 @@
       async syncCategoriesToFirestore(cats) {
         try {
           if (!Array.isArray(cats)) return;
+          const activeIds = new Set();
           for (let i = 0; i < cats.length; i++) {
             const item = cats[i];
             if (!item || typeof item !== "object") continue;
             const docId = sanitizeDocId(item.id, "cat", i);
+            activeIds.add(docId);
             await setDoc(doc(db, 'categories', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }), { merge: true });
+          }
+          // Hapus kategori di Firestore yang sudah dihapus di Website
+          const existingSnaps = await getDocs(collection(db, 'categories'));
+          for (const d of existingSnaps.docs) {
+            if (!activeIds.has(d.id)) {
+              await deleteDoc(doc(db, 'categories', d.id));
+            }
           }
           // Sinkronkan juga daftar nama kategori ke settings/categories untuk CatalogPreferences Android POS
           const catNames = cats.map(c => (c && c.name ? String(c.name).trim() : "")).filter(Boolean);
-          if (catNames.length > 0) {
-            await setDoc(doc(db, 'settings', 'categories'), cleanFirestorePayload({ list: catNames, updatedAt: Date.now() }), { merge: true });
-          }
+          await setDoc(doc(db, 'settings', 'categories'), cleanFirestorePayload({ list: catNames, updatedAt: Date.now() }));
         } catch(e) { console.error("Error syncCategoriesToFirestore:", e); }
       },
       async syncProductsToFirestore(prods) {
         try {
           if (!Array.isArray(prods)) return;
+          const activeIds = new Set();
           for (let i = 0; i < prods.length; i++) {
             const item = prods[i];
             if (!item || typeof item !== "object") continue;
             const docId = sanitizeDocId(item.id, "prod", i);
+            activeIds.add(docId);
             await setDoc(doc(db, 'products', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }), { merge: true });
+          }
+          // Bersihkan dokumen produk di Firestore yang sudah dihapus dari Website
+          const existingSnaps = await getDocs(collection(db, 'products'));
+          for (const d of existingSnaps.docs) {
+            if (!activeIds.has(d.id)) {
+              await deleteDoc(doc(db, 'products', d.id));
+            }
           }
         } catch(e) { console.error("Error syncProductsToFirestore:", e); }
       },
@@ -118,11 +135,19 @@
       async syncExtrasToFirestore(exts) {
         try {
           if (!Array.isArray(exts)) return;
+          const activeIds = new Set();
           for (let i = 0; i < exts.length; i++) {
             const item = exts[i];
             if (!item || typeof item !== "object") continue;
             const docId = sanitizeDocId(item.id, "ext", i);
+            activeIds.add(docId);
             await setDoc(doc(db, 'extras', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
+          }
+          const existingSnaps = await getDocs(collection(db, 'extras'));
+          for (const d of existingSnaps.docs) {
+            if (!activeIds.has(d.id)) {
+              await deleteDoc(doc(db, 'extras', d.id));
+            }
           }
         } catch(e) { console.error("Error syncExtrasToFirestore:", e); }
       },
@@ -136,11 +161,19 @@
       async syncPackagesToFirestore(pkgs) {
         try {
           if (!Array.isArray(pkgs)) return;
+          const activeIds = new Set();
           for (let i = 0; i < pkgs.length; i++) {
             const item = pkgs[i];
             if (!item || typeof item !== "object") continue;
             const docId = sanitizeDocId(item.id, "pkg", i);
+            activeIds.add(docId);
             await setDoc(doc(db, 'packages', docId), cleanFirestorePayload({ ...item, id: docId, sortIndex: i }));
+          }
+          const existingSnaps = await getDocs(collection(db, 'packages'));
+          for (const d of existingSnaps.docs) {
+            if (!activeIds.has(d.id)) {
+              await deleteDoc(doc(db, 'packages', d.id));
+            }
           }
         } catch(e) { console.error("Error syncPackagesToFirestore:", e); }
       },
@@ -218,6 +251,13 @@
       }
     }
 
+    let initialSeedFlags = {
+      categories: false,
+      products: false,
+      extras: false,
+      packages: false
+    };
+
     function initListeners() {
       testConnection();
 
@@ -233,6 +273,7 @@
       // Listen Categories (koleksi categories + settings/categories dari Android CatalogPreferences)
       onSnapshot(collection(db, 'categories'), (snap) => {
         if (!snap.empty) {
+          initialSeedFlags.categories = true;
           const list = [];
           snap.forEach(d => {
             const data = d.data() || {};
@@ -240,7 +281,8 @@
           });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreCategoriesUpdate) window.onFirestoreCategoriesUpdate(list);
-        } else if (window.CATEGORIES && window.CATEGORIES.length > 0) {
+        } else if (!initialSeedFlags.categories && window.CATEGORIES && window.CATEGORIES.length > 0) {
+          initialSeedFlags.categories = true;
           window.FirestoreSync.syncCategoriesToFirestore(window.CATEGORIES);
         }
       }, (e) => console.error("Categories onSnapshot error:", e));
@@ -257,6 +299,7 @@
       // Listen Products
       onSnapshot(collection(db, 'products'), (snap) => {
         if (!snap.empty) {
+          initialSeedFlags.products = true;
           const list = [];
           snap.forEach(d => {
             const data = d.data() || {};
@@ -264,14 +307,18 @@
           });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreProductsUpdate) window.onFirestoreProductsUpdate(list);
-        } else if (window.PRODUCTS && window.PRODUCTS.length > 0) {
+        } else if (!initialSeedFlags.products && window.PRODUCTS && window.PRODUCTS.length > 0) {
+          initialSeedFlags.products = true;
           window.FirestoreSync.syncProductsToFirestore(window.PRODUCTS);
+        } else if (initialSeedFlags.products && window.onFirestoreProductsUpdate) {
+          window.onFirestoreProductsUpdate([]);
         }
       }, (e) => console.error("Products onSnapshot error:", e));
 
       // Listen Extras
       onSnapshot(collection(db, 'extras'), (snap) => {
         if (!snap.empty) {
+          initialSeedFlags.extras = true;
           const list = [];
           snap.forEach(d => {
             const data = d.data() || {};
@@ -279,14 +326,18 @@
           });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestoreExtrasUpdate) window.onFirestoreExtrasUpdate(list);
-        } else if (window.EXTRAS && window.EXTRAS.length > 0) {
+        } else if (!initialSeedFlags.extras && window.EXTRAS && window.EXTRAS.length > 0) {
+          initialSeedFlags.extras = true;
           window.FirestoreSync.syncExtrasToFirestore(window.EXTRAS);
+        } else if (initialSeedFlags.extras && window.onFirestoreExtrasUpdate) {
+          window.onFirestoreExtrasUpdate([]);
         }
       }, (e) => console.error("Extras onSnapshot error:", e));
 
       // Listen Packages (Menu Paket)
       onSnapshot(collection(db, 'packages'), (snap) => {
         if (!snap.empty) {
+          initialSeedFlags.packages = true;
           const list = [];
           snap.forEach(d => {
             const data = d.data() || {};
@@ -294,10 +345,13 @@
           });
           list.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           if (window.onFirestorePackagesUpdate) window.onFirestorePackagesUpdate(list);
-        } else if (window.PACKAGE_MENUS && window.PACKAGE_MENUS.length > 0) {
+        } else if (!initialSeedFlags.packages && window.PACKAGE_MENUS && window.PACKAGE_MENUS.length > 0) {
+          initialSeedFlags.packages = true;
           if (window.FirestoreSync && window.FirestoreSync.syncPackagesToFirestore) {
             window.FirestoreSync.syncPackagesToFirestore(window.PACKAGE_MENUS);
           }
+        } else if (initialSeedFlags.packages && window.onFirestorePackagesUpdate) {
+          window.onFirestorePackagesUpdate([]);
         }
       }, (e) => console.error("Packages onSnapshot error:", e));
     }
@@ -364,9 +418,31 @@
       box-shadow: -22px 0 65px -12px rgba(0, 0, 0, 0.45), -8px 0 24px -6px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
       will-change: transform;
     }
+    gmp-place-autocomplete {
+      width: 100%;
+      display: block;
+      color-scheme: light;
+    }
   </style>
+  <script type="module" src="/src/deliveryMap.ts"></script>
 </head>
 <body class="bg-jp-paper text-stone-800 font-sans antialiased selection:bg-jp-crimson selection:text-white">
+
+  <!-- Google Maps Platform Quota Exceeded Top Bar (Case A Demo Key Defense) -->
+  <div id="gmpQuotaBanner" class="hidden bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+    <span>
+      Google Maps Platform quota reached. If you are the app owner, visit
+      <a
+        href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="underline font-semibold text-amber-950 hover:text-amber-800"
+      >
+        maps developer site
+      </a>
+      for instructions to update your account.
+    </span>
+  </div>
 
 
 
@@ -936,15 +1012,6 @@
           </div>
 
         </div>
-
-        <!-- Footer Bottom Brand Bar -->
-        <div class="mt-8 pt-6 border-t border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-stone-400 text-xs">
-          <div class="flex items-center gap-2.5">
-            <img src="data:image/png;base64,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" alt="Utori Sushi Logo" class="h-8 w-auto object-contain rounded shadow-xs" />
-            <span class="font-bold text-white tracking-wide">Utori Sushi & Donburi Bar (羽鳥)</span>
-          </div>
-          <p>© 2026 Utori Sushi & Donburi. Hak Cipta Dilindungi · Siap untuk GitHub Pages</p>
-        </div>
       </div>
     </section>
 
@@ -1027,7 +1094,7 @@
         </div>
 
         <!-- ==================== SISTEM RATING BINTANG & ULASAN KONSUMEN ==================== -->
-        <div class="pt-3 border-t border-stone-200 space-y-2.5">
+        <div id="varModalReviewSection" class="pt-3 border-t border-stone-200 space-y-2.5">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1.5">
               <svg class="w-4 h-4 text-amber-500 fill-amber-400" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
@@ -1303,7 +1370,7 @@
         </div>
 
         <!-- Cart Items List Container -->
-        <div id="cartItemsContainer" class="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 divide-y divide-stone-100">
+        <div id="cartItemsContainer" class="flex-1 min-h-[145px] overflow-y-auto p-3 sm:p-4 space-y-2.5 divide-y divide-stone-100">
           <!-- Populated by JavaScript -->
         </div>
 
@@ -1325,56 +1392,237 @@
         </div>
 
         <!-- Order Information Form & Summary (FOOTER RAMPING AGAR MENU TIDAK TERTUTUP) -->
-        <div id="cartCheckoutFooter" class="border-t border-stone-200 bg-stone-50 p-3 sm:p-3.5 space-y-2 shrink-0">
+        <div id="cartCheckoutFooter" class="border-t border-stone-200 bg-stone-50 p-3 sm:p-3.5 space-y-2 shrink-0 max-h-[60vh] overflow-y-auto">
           
           <!-- Compact Customer Details Box -->
           <div class="bg-white p-2.5 rounded-lg border border-stone-200 text-[11px] space-y-2">
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label for="customerName" class="block text-stone-600 font-medium mb-0.5 text-[10px]">Nama Pemesan *</label>
-                <input 
-                  type="text" 
-                  id="customerName" 
-                  placeholder="Nama Anda" 
-                  class="w-full px-2 py-1 bg-stone-50 border border-stone-200 rounded text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson"
-                />
-              </div>
-              <div>
-                <label for="tableOrAddress" id="tableOrAddressLabel" class="block text-stone-600 font-medium mb-0.5 text-[10px]">Alamat / Meja *</label>
-                <input 
-                  type="text" 
-                  id="tableOrAddress" 
-                  placeholder="Jl. Mawar / Meja 02" 
-                  class="w-full px-2 py-1 bg-stone-50 border border-stone-200 rounded text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson"
-                />
-              </div>
-            </div>
-
-            <div class="flex items-center justify-between gap-2 pt-0.5 border-t border-stone-100">
-              <span class="text-[10px] font-bold text-stone-600">Tipe Pesanan:</span>
+            <div class="flex items-center justify-between gap-2 pb-1 border-b border-stone-100">
+              <span class="text-[10px] font-bold text-stone-700">Tipe Pesanan:</span>
               <select 
                 id="orderType" 
-                class="px-2 py-0.5 bg-stone-100 border border-stone-200 rounded text-[10px] text-stone-700 focus:outline-none"
+                class="px-2 py-1 bg-stone-100 border border-stone-200 rounded text-[10px] font-semibold text-stone-800 focus:outline-none focus:ring-1 focus:ring-jp-crimson"
                 onchange="handleOrderTypeChange(this.value)"
               >
-                <option value="delivery">Antar (Delivery)</option>
+                <option value="delivery">Antar (Delivery - Gojek/GoSend)</option>
                 <option value="dinein">Makan di Tempat (Dine-in)</option>
                 <option value="takeaway">Bungkus (Takeaway)</option>
               </select>
             </div>
 
-            <!-- Bagian Ekstra & Pelengkap Dinamis dengan Custom Quantity & Harga -->
-            <div class="border-t border-stone-100 pt-1.5 space-y-1">
-              <div class="flex items-center justify-between text-[10px]">
-                <span class="font-bold text-stone-700 flex items-center gap-1">
-                  <i data-lucide="sparkles" class="w-3 h-3 text-emerald-600"></i>
-                  <span>Pilihan Ekstra & Pelengkap (Atur Jumlah):</span>
+            <div id="customerIdentityGrid" class="grid grid-cols-2 gap-2">
+              <div id="customerNameWrapper">
+                <label for="customerName" class="block text-stone-600 font-medium mb-0.5 text-[10px]">Nama Pemesan *</label>
+                <input 
+                  type="text" 
+                  id="customerName" 
+                  placeholder="Nama Lengkap" 
+                  oninput="saveCustomerDeliveryDraft()"
+                  class="w-full px-2 py-1 bg-stone-50 border border-stone-200 rounded text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson"
+                />
+              </div>
+              <div id="customerPhoneWrapper">
+                <label for="customerPhone" class="block text-stone-600 font-medium mb-0.5 text-[10px]">No. Telp / WA *</label>
+                <input 
+                  type="tel" 
+                  id="customerPhone" 
+                  placeholder="0812xxxxxxxx" 
+                  oninput="saveCustomerDeliveryDraft()"
+                  class="w-full px-2 py-1 bg-stone-50 border border-stone-200 rounded text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson font-mono"
+                />
+              </div>
+            </div>
+
+            <div id="tableOrAddressWrapper">
+              <label for="tableOrAddress" id="tableOrAddressLabel" class="block text-stone-600 font-medium mb-0.5 text-[10px]">Alamat Lengkap &amp; Patokan *</label>
+              <input 
+                type="text" 
+                id="tableOrAddress" 
+                placeholder="Jl. Sarimanah No. 10, Blok B2, pagar hitam..." 
+                oninput="saveCustomerDeliveryDraft()"
+                class="w-full px-2 py-1 bg-stone-50 border border-stone-200 rounded text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson"
+              />
+            </div>
+
+            <!-- Jumlah Orang & Pilihan Waktu (Khusus Dine-in) -->
+            <div id="dineInGuestWrapper" class="hidden space-y-1.5">
+              <div class="grid grid-cols-2 gap-2 items-end">
+                <div>
+                  <label for="dineInGuestCount" class="block text-stone-600 font-medium mb-1 text-[10px]">Jumlah Orang *</label>
+                  <div class="flex items-center gap-1.5">
+                    <div class="inline-flex items-center border border-stone-200 rounded-lg bg-stone-50 overflow-hidden">
+                      <button
+                        type="button"
+                        onclick="adjustDineInGuestCount(-1)"
+                        class="px-2.5 py-1.5 text-xs font-bold text-stone-700 hover:bg-stone-200 active:bg-stone-300 transition cursor-pointer"
+                        aria-label="Kurangi jumlah orang"
+                      >−</button>
+                      <input
+                        type="number"
+                        id="dineInGuestCount"
+                        min="1"
+                        max="99"
+                        value="2"
+                        oninput="saveCustomerDeliveryDraft()"
+                        class="w-10 text-center py-1 bg-white border-x border-stone-200 text-xs font-bold text-stone-900 focus:outline-none focus:ring-1 focus:ring-jp-crimson tabular-nums"
+                      />
+                      <button
+                        type="button"
+                        onclick="adjustDineInGuestCount(1)"
+                        class="px-2.5 py-1.5 text-xs font-bold text-stone-700 hover:bg-stone-200 active:bg-stone-300 transition cursor-pointer"
+                        aria-label="Tambah jumlah orang"
+                      >+</button>
+                    </div>
+                    <span class="text-[11px] font-semibold text-stone-600">Org</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label for="dineInTimeSelect" class="block text-stone-600 font-medium mb-1 text-[10px]">Pilihan Waktu *</label>
+                  <select
+                    id="dineInTimeSelect"
+                    onchange="onDineInTimeSelectChange()"
+                    class="w-full px-2 py-1.5 bg-stone-50 border border-stone-200 rounded-lg text-xs font-semibold text-stone-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson"
+                  >
+                    <option value="sekarang">Sekarang</option>
+                    <option value="15m">15 Menit lagi</option>
+                    <option value="30m">30 Menit lagi</option>
+                    <option value="60m">1 Jam lagi</option>
+                    <option value="custom">Pilih Jam (Custom)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="dineInCustomTimeRow" class="hidden pt-0.5 flex items-center gap-2">
+                <label for="dineInCustomTime" class="text-[10px] font-medium text-stone-600 whitespace-nowrap">Pilih Jam:</label>
+                <input
+                  type="time"
+                  id="dineInCustomTime"
+                  onchange="onDineInCustomTimeChange()"
+                  oninput="onDineInCustomTimeChange()"
+                  class="flex-1 px-2 py-1 bg-stone-50 border border-stone-200 rounded-lg text-xs font-mono font-semibold text-stone-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson"
+                />
+                <span class="text-[10px] font-semibold text-stone-500">WIB</span>
+              </div>
+              <p id="dineInTimeSummaryHint" class="text-[10px] text-emerald-700 font-medium"></p>
+            </div>
+
+            <!-- Pilihan Waktu Ambil (Khusus Bungkus / Takeaway) -->
+            <div id="takeawayPickupWrapper" class="hidden space-y-1.5">
+              <label class="block text-stone-600 font-medium text-[10px]">Waktu Ambil *</label>
+              <div id="takeawayPresetButtons" class="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                <button
+                  type="button"
+                  data-pickup="sekarang"
+                  onclick="selectTakeawayPickupPreset('sekarang')"
+                  class="takeaway-preset-btn px-2 py-1.5 rounded-lg border text-[11px] font-semibold transition cursor-pointer"
+                >Sekarang</button>
+                <button
+                  type="button"
+                  data-pickup="15m"
+                  onclick="selectTakeawayPickupPreset('15m')"
+                  class="takeaway-preset-btn px-2 py-1.5 rounded-lg border text-[11px] font-semibold transition cursor-pointer"
+                >15 Menit</button>
+                <button
+                  type="button"
+                  data-pickup="30m"
+                  onclick="selectTakeawayPickupPreset('30m')"
+                  class="takeaway-preset-btn px-2 py-1.5 rounded-lg border text-[11px] font-semibold transition cursor-pointer"
+                >30 Menit</button>
+                <button
+                  type="button"
+                  data-pickup="60m"
+                  onclick="selectTakeawayPickupPreset('60m')"
+                  class="takeaway-preset-btn px-2 py-1.5 rounded-lg border text-[11px] font-semibold transition cursor-pointer"
+                >1 Jam</button>
+                <button
+                  type="button"
+                  data-pickup="custom"
+                  onclick="selectTakeawayPickupPreset('custom')"
+                  class="takeaway-preset-btn col-span-2 sm:col-span-1 px-2 py-1.5 rounded-lg border text-[11px] font-semibold transition cursor-pointer"
+                >Custom Jam</button>
+              </div>
+              <div id="takeawayCustomTimeRow" class="hidden pt-1 flex items-center gap-2">
+                <label for="takeawayCustomTime" class="text-[10px] font-medium text-stone-600 whitespace-nowrap">Pilih Jam:</label>
+                <input
+                  type="time"
+                  id="takeawayCustomTime"
+                  onchange="onTakeawayCustomTimeChange()"
+                  oninput="onTakeawayCustomTimeChange()"
+                  class="flex-1 px-2 py-1 bg-stone-50 border border-stone-200 rounded-lg text-xs font-mono font-semibold text-stone-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-jp-crimson"
+                />
+                <span class="text-[10px] font-semibold text-stone-500">WIB</span>
+              </div>
+              <p id="takeawayPickupSummaryHint" class="text-[10px] text-emerald-700 font-medium"></p>
+            </div>
+
+            <!-- Google Maps Delivery Pin Picker Row (Wajib untuk Delivery) -->
+            <div id="deliveryMapPickerRow" class="rounded-lg border border-amber-200 bg-amber-50/70 p-2 space-y-1.5">
+              <div class="flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-1 text-[10px] font-bold text-stone-800">
+                    <i data-lucide="map-pin" class="w-3 h-3 text-jp-crimson shrink-0"></i>
+                    <span>Titik Peta Google Maps *</span>
+                  </div>
+                  <p id="deliveryMapStatusBadge" class="text-[10px] text-amber-800 font-medium truncate">
+                    Belum dipin — wajib pilih titik lokasi antar
+                  </p>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onclick="quickPinCurrentLocation()"
+                    class="px-2 py-1 rounded bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                    title="Gunakan GPS perangkat saat ini"
+                  >
+                    <i data-lucide="locate-fixed" class="w-3 h-3 text-emerald-600"></i>
+                    <span>GPS</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="btnOpenDeliveryMapModal"
+                    onclick="openDeliveryMapModal()"
+                    class="px-2 py-1 rounded bg-jp-crimson hover:bg-red-700 text-white text-[10px] font-bold flex items-center gap-1 shadow-xs transition cursor-pointer"
+                  >
+                    <i data-lucide="map" class="w-3 h-3"></i>
+                    <span>Pilih Titik</span>
+                  </button>
+                </div>
+              </div>
+              <p id="deliveryMapPinAddrPreview" class="hidden text-[9.5px] text-emerald-800 bg-white/90 border border-emerald-200 rounded px-1.5 py-1 leading-snug"></p>
+            </div>
+
+            <!-- Informasi Pembayaran Kurir Gojek (Khusus Delivery) -->
+            <div id="deliveryCourierNote" class="flex items-start gap-1.5 rounded-md bg-emerald-50 border border-emerald-200 px-2 py-1.5 text-[10px] text-emerald-900 leading-snug">
+              <i data-lucide="bike" class="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5"></i>
+              <span>Driver <strong>Gojek (GoSend)</strong> akan dipanggil kasir setelah pesanan selesai diproses. Ongkir dibayar <strong>tunai (cash) oleh penerima</strong>.</span>
+            </div>
+
+            <!-- Tombol Khusus Membuka Halaman Pilihan Ekstra & Pelengkap -->
+            <div class="border-t border-stone-100 pt-1.5">
+              <button
+                type="button"
+                id="btnOpenCartExtrasModal"
+                onclick="openCartExtrasModal()"
+                class="w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border border-stone-200 bg-stone-50 hover:bg-emerald-50/70 hover:border-emerald-300 transition text-left cursor-pointer group"
+              >
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                    <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-[11px] font-bold text-stone-800 group-hover:text-emerald-900 truncate">
+                      Pilihan Ekstra &amp; Pelengkap
+                    </div>
+                    <div id="cartExtrasSummaryBadge" class="text-[10px] text-stone-500 truncate">
+                      Opsional — tekan untuk atur tambahan
+                    </div>
+                  </div>
+                </div>
+                <span class="px-2.5 py-1 rounded-md bg-white border border-stone-200 group-hover:border-emerald-300 text-[10px] font-bold text-emerald-700 shrink-0 flex items-center gap-1 shadow-2xs">
+                  <span>Atur</span>
+                  <i data-lucide="chevron-right" class="w-3 h-3"></i>
                 </span>
-                <span class="text-[9px] text-stone-400">Atur quantity custom</span>
-              </div>
-              <div id="cartExtrasContainer" class="flex flex-col gap-1 max-h-36 sm:max-h-44 overflow-y-auto pr-0.5">
-                <!-- Dynamically populated by renderCartExtrasUI() -->
-              </div>
+              </button>
             </div>
 
             <div>
@@ -1454,6 +1702,165 @@
 
         </div>
 
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== HALAMAN PILIHAN EKSTRA & PELENGKAP (TERPISAH DARI KERANJANG) ==================== -->
+  <div
+    id="cartExtrasModalBackdrop"
+    class="fixed inset-0 z-[85] bg-black/70 backdrop-blur-xs opacity-0 pointer-events-none transition-opacity duration-200 flex items-end sm:items-center justify-center sm:p-4"
+    onclick="if (event.target === this) closeCartExtrasModal()"
+  >
+    <div
+      id="cartExtrasModalPanel"
+      class="w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[90vh] h-[82vh] sm:h-auto transform translate-y-4 sm:translate-y-0 transition-transform duration-200"
+    >
+      <!-- Header Halaman Ekstra -->
+      <div class="px-4 py-3.5 bg-jp-sumi text-white flex items-center justify-between border-b border-stone-800 shrink-0">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <button
+            type="button"
+            onclick="closeCartExtrasModal()"
+            class="p-1.5 -ml-1 text-stone-300 hover:text-white rounded-lg hover:bg-stone-800 transition cursor-pointer shrink-0"
+            aria-label="Kembali ke Keranjang"
+          >
+            <i data-lucide="arrow-left" class="w-4 h-4"></i>
+          </button>
+          <div class="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+            <i data-lucide="sparkles" class="w-4 h-4"></i>
+          </div>
+          <div class="min-w-0">
+            <h3 class="font-display font-bold text-sm sm:text-base text-white truncate">Pilihan Ekstra &amp; Pelengkap</h3>
+            <p class="text-[10px] text-stone-300 truncate">Atur jumlah wasabi, gari, mayones, atau tambahan lainnya</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onclick="closeCartExtrasModal()"
+          class="p-1.5 text-stone-400 hover:text-white rounded-lg hover:bg-stone-800 transition cursor-pointer shrink-0"
+          aria-label="Tutup Halaman Ekstra"
+        >
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- List Pilihan Ekstra (Lega & Mudah Di-scroll) -->
+      <div class="flex-1 overflow-y-auto p-3.5 sm:p-4 bg-stone-50">
+        <div id="cartExtrasContainer" class="flex flex-col gap-2">
+          <!-- Dynamically populated by renderCartExtrasUI() -->
+        </div>
+      </div>
+
+      <!-- Footer Halaman Ekstra -->
+      <div class="px-4 py-3 bg-white border-t border-stone-200 flex items-center justify-between gap-2 shrink-0">
+        <div class="flex flex-col min-w-0">
+          <span class="text-[10px] text-stone-500">Total Ekstra Dipilih:</span>
+          <div class="flex items-center gap-2">
+            <span id="cartExtrasModalTotalText" class="font-mono font-bold text-sm text-emerald-700 tabular-nums">Rp 0</span>
+            <button
+              type="button"
+              id="btnResetCartExtras"
+              onclick="resetCartExtrasSelection()"
+              class="hidden text-[10px] font-bold text-rose-600 hover:text-rose-700 underline cursor-pointer"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          onclick="closeCartExtrasModal()"
+          class="px-4 py-2 rounded-xl bg-jp-crimson hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer shrink-0"
+        >
+          <i data-lucide="check" class="w-3.5 h-3.5"></i>
+          <span>Selesai &amp; Kembali</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL PEMILIH TITIK GOOGLE MAPS (DELIVERY) ==================== -->
+  <div
+    id="deliveryMapModalBackdrop"
+    class="fixed inset-0 z-[80] bg-black/70 backdrop-blur-xs opacity-0 pointer-events-none transition-opacity duration-200 flex items-center justify-center p-3 sm:p-4"
+    onclick="if (event.target === this) closeDeliveryMapModal()"
+  >
+    <div class="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[92vh]">
+      <div class="px-4 py-3 bg-jp-sumi text-white flex items-center justify-between border-b border-stone-800 shrink-0">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-jp-crimson text-white flex items-center justify-center shrink-0">
+            <i data-lucide="map-pin" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="font-display font-bold text-sm sm:text-base text-white">Titik Pengantaran Google Maps</h3>
+            <p class="text-[10px] text-stone-300">Cari alamat, klik peta, atau geser pin merah ke lokasi Anda</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onclick="closeDeliveryMapModal()"
+          class="p-1.5 text-stone-400 hover:text-white rounded-lg hover:bg-stone-800 transition cursor-pointer"
+          aria-label="Tutup Peta Delivery"
+        >
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="p-3 sm:p-4 space-y-2.5 overflow-y-auto">
+        <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+          <div id="deliveryMapAutocompleteHost" class="flex-1 min-w-0 rounded-lg border border-stone-300 bg-white overflow-hidden"></div>
+          <button
+            type="button"
+            onclick="quickPinCurrentLocation(true)"
+            class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 shrink-0 shadow-xs transition cursor-pointer"
+          >
+            <i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i>
+            <span>Lokasi Saya (GPS)</span>
+          </button>
+        </div>
+
+        <div class="relative rounded-xl overflow-hidden border border-stone-300 bg-stone-100">
+          <div id="deliveryGoogleMapCanvas" class="w-full h-64 sm:h-72"></div>
+          <div
+            id="deliveryMapLoadingOverlay"
+            class="absolute inset-0 bg-stone-100/90 flex flex-col items-center justify-center gap-2 text-xs text-stone-600 font-medium"
+          >
+            <i data-lucide="loader-2" class="w-5 h-5 animate-spin text-jp-crimson"></i>
+            <span>Memuat Google Maps...</span>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-stone-200 bg-stone-50 p-2.5 space-y-1">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Koordinat Pin Terpilih</span>
+            <span id="deliveryMapModalCoords" class="font-mono text-[11px] font-bold text-emerald-700">
+              Belum dipilih
+            </span>
+          </div>
+          <p id="deliveryMapModalAddress" class="text-[11px] text-stone-700 leading-snug">
+            Silakan geser pin merah atau cari jalan/lokasi tujuan Anda di atas.
+          </p>
+          <p id="deliveryMapModalStatus" class="text-[10px] text-stone-500 italic"></p>
+        </div>
+      </div>
+
+      <div class="px-4 py-3 bg-stone-50 border-t border-stone-200 flex items-center justify-end gap-2 shrink-0">
+        <button
+          type="button"
+          onclick="closeDeliveryMapModal()"
+          class="px-3.5 py-2 rounded-lg border border-stone-300 bg-white hover:bg-stone-100 text-stone-700 text-xs font-bold transition cursor-pointer"
+        >
+          Batal
+        </button>
+        <button
+          type="button"
+          onclick="confirmDeliveryMapSelection()"
+          class="px-4 py-2 rounded-lg bg-jp-crimson hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+        >
+          <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>
+          <span>Konfirmasi Titik Lokasi</span>
+        </button>
       </div>
     </div>
   </div>
@@ -2226,6 +2633,27 @@
             <p class="text-[10px] text-stone-400 mt-1">Tautan Google Maps untuk tombol petunjuk arah dan navigasi pelanggan</p>
           </div>
 
+          <div class="p-3.5 bg-stone-50 border border-stone-200 rounded-xl flex items-center justify-between gap-3">
+            <div class="space-y-0.5">
+              <label for="adminInputShowRatings" class="block text-stone-800 font-bold text-xs cursor-pointer">
+                Tampilkan Penilaian Produk (Rating & Ulasan)
+              </label>
+              <p class="text-[11px] text-stone-500">
+                Aktifkan atau sembunyikan bintang rating, jumlah ulasan, dan kotak review konsumen di katalog, detail menu, dan slideshow.
+              </p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                id="adminInputShowRatings"
+                checked
+                onchange="handleToggleShowRatings(this.checked)"
+                class="sr-only peer"
+              />
+              <div class="w-10 h-5 bg-stone-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
           <div class="pt-2">
             <button 
               onclick="saveStoreProfile()" 
@@ -2503,15 +2931,7 @@
   <!-- ==================== 6. FOOTER ==================== -->
   <footer class="bg-jp-sumi text-stone-400 text-xs py-10 border-t border-stone-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pb-8 border-b border-stone-800">
-
-        <!-- Col 2: Kategori Menu Dinamis -->
-        <div>
-          <h5 class="font-bold text-white uppercase text-[10px] tracking-wider mb-2.5">Kategori Menu</h5>
-          <ul id="footerCategoryList" class="space-y-1.5 text-xs">
-            <!-- Populated dynamically -->
-          </ul>
-        </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pb-8 border-b border-stone-800">
 
         <!-- Col 3: Layanan Restoran & Tombol Admin -->
         <div>
@@ -2548,9 +2968,13 @@
 
       </div>
 
-      <div class="pt-5 flex flex-col sm:flex-row items-center justify-between text-stone-500 gap-2 text-[11px]">
-        <p>&copy; 2026 Utori Sushi & Donburi (羽鳥). Hak Cipta Dilindungi.</p>
-        <p>Kode tunggal mandiri: HTML5, Tailwind CDN, dan Vanilla JavaScript.</p>
+      <!-- Footer Bottom Brand Bar -->
+      <div class="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-stone-400 text-xs">
+        <div class="flex items-center gap-2.5">
+          <img src="data:image/png;base64,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" alt="Utori Sushi Logo" class="h-8 w-auto object-contain rounded shadow-xs" />
+          <span class="font-bold text-white tracking-wide">Utori Sushi & Donburi Bar (羽鳥)</span>
+        </div>
+        <p>© 2026 Utori Sushi & Donburi. Hak Cipta Dilindungi · Siap untuk GitHub Pages</p>
       </div>
     </div>
   </footer>
@@ -2577,8 +3001,13 @@
       mapsUrl: "https://maps.app.goo.gl/fV8zzDvPwQcDcgmv5?g_st=ac",
       hours: "Lunch: 11.00 - 15.00 WIB | Dinner: 17.00 - 22.00 WIB",
       currencyLocale: "id-ID",
-      currencyCode: "IDR"
+      currencyCode: "IDR",
+      showRatingsAndReviews: true
     };
+
+    function isRatingsEnabled() {
+      return CONFIG.showRatingsAndReviews !== false;
+    }
 
     /**
      * 3. KATEGORI DEFAULT
@@ -2642,9 +3071,9 @@
      */
     const DEFAULT_PRODUCTS = [
       {
-        id: "jp-1",
+        id: "1",
         name: "Salmon Mentai Aburi Roll (8 pcs)",
-        category: "sushi",
+        category: "Sushi & Roll",
         price: 58000,
         rating: 4.9,
         reviewsCount: 240,
@@ -2664,9 +3093,9 @@
         ]
       },
       {
-        id: "jp-2",
+        id: "2",
         name: "Yakiniku Don",
-        category: "donburi",
+        category: "Donburi (Rice Bowl)",
         price: 68000,
         rating: 4.9,
         reviewsCount: 198,
@@ -2686,9 +3115,9 @@
         ]
       },
       {
-        id: "jp-3",
+        id: "3",
         name: "Salmon Nigiri Set (4 pcs)",
-        category: "sushi",
+        category: "Sushi & Roll",
         price: 52000,
         rating: 4.9,
         reviewsCount: 175,
@@ -2702,9 +3131,9 @@
         ]
       },
       {
-        id: "jp-4",
+        id: "4",
         name: "Chicken Katsu Japanese Curry Don",
-        category: "donburi",
+        category: "Donburi (Rice Bowl)",
         price: 48000,
         rating: 4.8,
         reviewsCount: 312,
@@ -2718,9 +3147,9 @@
         ]
       },
       {
-        id: "jp-5",
+        id: "5",
         name: "Dragon Spicy Crunch Roll (8 pcs)",
-        category: "sushi",
+        category: "Sushi & Roll",
         price: 62000,
         rating: 4.8,
         reviewsCount: 160,
@@ -2740,9 +3169,9 @@
         ]
       },
       {
-        id: "jp-6",
+        id: "6",
         name: "Unagi Kabayaki Donburi",
-        category: "donburi",
+        category: "Donburi (Rice Bowl)",
         price: 85000,
         rating: 4.9,
         reviewsCount: 115,
@@ -2758,9 +3187,9 @@
         ]
       },
       {
-        id: "jp-7",
+        id: "7",
         name: "Spicy Tuna Maki Roll (6 pcs)",
-        category: "sushi",
+        category: "Sushi & Roll",
         price: 42000,
         rating: 4.7,
         reviewsCount: 92,
@@ -2774,9 +3203,9 @@
         ]
       },
       {
-        id: "jp-8",
+        id: "8",
         name: "Ebi Tempura Moriawase Set",
-        category: "side",
+        category: "Side Dish & Tempura",
         price: 45000,
         rating: 4.8,
         reviewsCount: 138,
@@ -2790,9 +3219,9 @@
         ]
       },
       {
-        id: "jp-9",
+        id: "9",
         name: "Iced Uji Kyoto Matcha Latte",
-        category: "minuman",
+        category: "Minuman & Ocha",
         price: 28000,
         rating: 4.9,
         reviewsCount: 210,
@@ -2810,9 +3239,9 @@
         ]
       },
       {
-        id: "jp-10",
+        id: "10",
         name: "Genmaicha Roasted Green Tea (Hot/Cold)",
-        category: "minuman",
+        category: "Minuman & Ocha",
         price: 15000,
         rating: 4.8,
         reviewsCount: 165,
@@ -3026,6 +3455,15 @@
       updateKitchenStatusUI();
       setInterval(updateKitchenStatusUI, 60000);
 
+      // Quota warning banner listener for Google Maps Platform
+      window.addEventListener("gmp-quota-exceeded", () => {
+        const banner = document.getElementById("gmpQuotaBanner");
+        if (banner) banner.classList.remove("hidden");
+      });
+
+      restoreCustomerDeliveryDraft();
+      const initialOrderType = document.getElementById("orderType")?.value || "delivery";
+      handleOrderTypeChange(initialOrderType);
 
       if (window.lucide) window.lucide.createIcons();
     });
@@ -3206,7 +3644,6 @@
 
     function renderCategoryTabs() {
       const container = document.getElementById("categoryTabsContainer");
-      const footerContainer = document.getElementById("footerCategoryList");
       if (!container) return;
 
       let html = `
@@ -3233,16 +3670,6 @@
       });
 
       container.innerHTML = html;
-
-      if (footerContainer) {
-        footerContainer.innerHTML = CATEGORIES.map(cat => `
-          <li>
-            <a href="#katalog-menu" onclick="filterCategory('${cat.id}')" class="hover:text-jp-crimson transition">
-              ${cat.name}
-            </a>
-          </li>
-        `).join("");
-      }
 
       const catSelect = document.getElementById("newMenuCategory");
       if (catSelect) {
@@ -3330,7 +3757,10 @@
       }
 
       // Sinkronkan 2 arah antara options (Website) dan modifierGroups (Android POS)
-      if (Array.isArray(p.modifierGroups) && p.modifierGroups.length > 0) {
+      if (p.hasVariations === false) {
+        p.options = [];
+        p.modifierGroups = [];
+      } else if (Array.isArray(p.modifierGroups) && p.modifierGroups.length > 0) {
         p.options = buildOptionsFromModifierGroups(p.modifierGroups);
       } else if (Array.isArray(p.options) && p.options.length > 0) {
         p.modifierGroups = buildModifierGroupsFromOptions(p.options);
@@ -3441,16 +3871,20 @@
 
             <div class="p-3 sm:p-3.5 flex-1 flex flex-col justify-between">
               <div>
-                <div class="flex items-center justify-between gap-1 mb-1 text-[11px]">
-                  <div class="flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5 fill-amber-400 text-amber-400" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
-                    <span class="font-bold text-stone-900">${item.rating || 4.9}</span>
-                    <span class="text-stone-400 text-[10px]">(${item.reviewsCount || 100})</span>
+                ${(isRatingsEnabled() || (typeof item.stock === 'number' && item.stock > 0 && item.stock <= 5)) ? `
+                  <div class="flex items-center justify-between gap-1 mb-1 text-[11px]">
+                    ${isRatingsEnabled() ? `
+                      <div class="flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5 fill-amber-400 text-amber-400" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                        <span class="font-bold text-stone-900">${item.rating || 4.9}</span>
+                        <span class="text-stone-400 text-[10px]">(${item.reviewsCount || 100})</span>
+                      </div>
+                    ` : '<span></span>'}
+                    ${typeof item.stock === 'number' && item.stock > 0 && item.stock <= 5 ? `
+                      <span class="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">Sisa ${item.stock}</span>
+                    ` : ''}
                   </div>
-                  ${typeof item.stock === 'number' && item.stock > 0 && item.stock <= 5 ? `
-                    <span class="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">Sisa ${item.stock}</span>
-                  ` : ''}
-                </div>
+                ` : ''}
 
                 <h3 onclick="${isOutOfStock ? '' : `handleProductClick('${item.id}')`}" class="font-display font-bold text-xs sm:text-sm text-stone-900 group-hover:text-jp-crimson transition-colors line-clamp-1 ${isOutOfStock ? '' : 'cursor-pointer'}">
                   ${item.name}
@@ -3578,7 +4012,13 @@
         catEl.textContent = resolveCategoryLabel(product.category);
       }
       if (ratingEl) {
-        ratingEl.innerHTML = `★ ${product.rating || 4.9} <span class="text-stone-300 font-normal">(${product.reviewsCount || 100}+ ulasan)</span>`;
+        if (isRatingsEnabled()) {
+          ratingEl.style.display = "";
+          ratingEl.innerHTML = `★ ${product.rating || 4.9} <span class="text-stone-300 font-normal">(${product.reviewsCount || 100}+ ulasan)</span>`;
+        } else {
+          ratingEl.style.display = "none";
+          ratingEl.innerHTML = "";
+        }
       }
 
       const qtyDisplay = document.getElementById("varQuantityDisplay");
@@ -3619,6 +4059,11 @@
     };
 
     function initProductReviewSection(product) {
+      const reviewSection = document.getElementById("varModalReviewSection");
+      if (reviewSection) {
+        reviewSection.style.display = isRatingsEnabled() ? "" : "none";
+      }
+      if (!isRatingsEnabled()) return;
       selectedRatingScore = 5;
       hoverRatingScore = 0;
       renderInteractiveStarButtons();
@@ -4023,10 +4468,14 @@
       const menuSubtotal = cart.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
 
       let extrasTotal = 0;
+      let extrasSelectedQty = 0;
+      let extrasSelectedTypes = 0;
       EXTRAS.forEach(e => {
         if (e.enabled !== false) {
           const qty = Number(selectedCartExtras[e.id]) || 0;
           if (qty > 0) {
+            extrasSelectedQty += qty;
+            extrasSelectedTypes += 1;
             extrasTotal += (Number(e.price) || 0) * qty;
           }
         }
@@ -4064,11 +4513,31 @@
       const cartTotalText = document.getElementById("cartTotalText");
       const cartMenuSubtotalText = document.getElementById("cartMenuSubtotalText");
       const cartExtrasTotalText = document.getElementById("cartExtrasTotalText");
+      const cartExtrasSummaryBadge = document.getElementById("cartExtrasSummaryBadge");
+      const cartExtrasModalTotalText = document.getElementById("cartExtrasModalTotalText");
+      const btnResetCartExtras = document.getElementById("btnResetCartExtras");
 
       if (cartItemCountLabel) cartItemCountLabel.textContent = `${totalCount} porsi dipilih`;
       if (cartMenuSubtotalText) cartMenuSubtotalText.textContent = currencyFormatter.format(menuSubtotal);
       if (cartExtrasTotalText) {
         cartExtrasTotalText.textContent = extrasTotal > 0 ? `+${currencyFormatter.format(extrasTotal)}` : 'Rp 0';
+      }
+      if (cartExtrasModalTotalText) {
+        cartExtrasModalTotalText.textContent = extrasSelectedQty > 0
+          ? `${extrasSelectedQty} item (${extrasTotal > 0 ? '+' + currencyFormatter.format(extrasTotal) : 'Gratis'})`
+          : 'Rp 0';
+      }
+      if (btnResetCartExtras) {
+        btnResetCartExtras.classList.toggle("hidden", extrasSelectedQty === 0);
+      }
+      if (cartExtrasSummaryBadge) {
+        if (extrasSelectedQty > 0) {
+          cartExtrasSummaryBadge.className = "text-[10px] text-emerald-700 font-bold truncate";
+          cartExtrasSummaryBadge.textContent = `${extrasSelectedTypes} jenis (${extrasSelectedQty} pcs) · ${extrasTotal > 0 ? '+' + currencyFormatter.format(extrasTotal) : 'Gratis'}`;
+        } else {
+          cartExtrasSummaryBadge.className = "text-[10px] text-stone-500 truncate";
+          cartExtrasSummaryBadge.textContent = "Opsional — tekan untuk atur tambahan";
+        }
       }
       if (cartTotalText) cartTotalText.textContent = currencyFormatter.format(grandTotal);
 
@@ -4167,6 +4636,8 @@
       if (!backdrop || !drawer) return;
 
       resetClearCartBtn();
+      renderTakeawayPickupUI();
+      renderDineInTimeUI();
       backdrop.classList.remove("pointer-events-none", "opacity-0");
       backdrop.classList.add("opacity-100");
 
@@ -4195,8 +4666,43 @@
       }
     }
 
+    function openCartExtrasModal() {
+      const backdrop = document.getElementById("cartExtrasModalBackdrop");
+      const panel = document.getElementById("cartExtrasModalPanel");
+      if (!backdrop) return;
+      renderCartExtrasUI();
+      updateCartUI();
+      backdrop.classList.remove("pointer-events-none", "opacity-0");
+      backdrop.classList.add("opacity-100");
+      if (panel) {
+        panel.classList.remove("translate-y-4");
+      }
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function closeCartExtrasModal() {
+      const backdrop = document.getElementById("cartExtrasModalBackdrop");
+      const panel = document.getElementById("cartExtrasModalPanel");
+      if (!backdrop) return;
+      if (panel) {
+        panel.classList.add("translate-y-4");
+      }
+      backdrop.classList.remove("opacity-100");
+      backdrop.classList.add("opacity-0", "pointer-events-none");
+    }
+
+    function resetCartExtrasSelection() {
+      selectedCartExtras = {};
+      saveCartToStorage();
+      renderCartExtrasUI();
+      updateCartUI();
+      showToast("Pilihan ekstra & pelengkap direset", 2000);
+    }
+
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
+        closeCartExtrasModal();
+        closeDeliveryMapModal();
         closePackageMenuPage();
         closeCartModal();
         closeAdminModal();
@@ -4206,22 +4712,423 @@
       }
     });
 
+    let selectedDeliveryPin = null;
+    let draftDeliveryPin = null;
+    let selectedTakeawayPreset = "sekarang";
+
+    function getDefaultCustomPickupTimeStr() {
+      const target = new Date(Date.now() + 30 * 60000);
+      const hh = String(target.getHours()).padStart(2, "0");
+      const mm = String(target.getMinutes()).padStart(2, "0");
+      return `${hh}:${mm}`;
+    }
+
+    function formatClockOffset(minutesToAdd) {
+      const target = new Date(Date.now() + minutesToAdd * 60000);
+      const hh = String(target.getHours()).padStart(2, "0");
+      const mm = String(target.getMinutes()).padStart(2, "0");
+      return `${hh}.${mm}`;
+    }
+
+    function getResolvedTakeawayPickupLabel() {
+      if (selectedTakeawayPreset === "sekarang") {
+        return "Sekarang (Langsung diproses)";
+      }
+      if (selectedTakeawayPreset === "15m") {
+        return `15 Menit lagi (pukul ${formatClockOffset(15)} WIB)`;
+      }
+      if (selectedTakeawayPreset === "30m") {
+        return `30 Menit lagi (pukul ${formatClockOffset(30)} WIB)`;
+      }
+      if (selectedTakeawayPreset === "60m") {
+        return `1 Jam lagi (pukul ${formatClockOffset(60)} WIB)`;
+      }
+      const timeInput = document.getElementById("takeawayCustomTime");
+      const rawTime = timeInput ? timeInput.value.trim() : "";
+      if (!rawTime) return "";
+      return `Pukul ${rawTime.replace(":", ".")} WIB (Custom)`;
+    }
+
+    function renderTakeawayPickupUI() {
+      const buttons = document.querySelectorAll(".takeaway-preset-btn");
+      buttons.forEach(btn => {
+        const val = btn.getAttribute("data-pickup");
+        const isActive = val === selectedTakeawayPreset;
+        btn.className = isActive
+          ? "takeaway-preset-btn px-2 py-1.5 rounded-lg border text-[11px] font-bold transition cursor-pointer bg-jp-crimson text-white border-jp-crimson shadow-xs"
+          : "takeaway-preset-btn px-2 py-1.5 rounded-lg border text-[11px] font-semibold transition cursor-pointer bg-stone-50 text-stone-700 border-stone-200 hover:bg-stone-100";
+        if (val === "custom") {
+          btn.classList.add("col-span-2", "sm:col-span-1");
+        }
+      });
+
+      const customRow = document.getElementById("takeawayCustomTimeRow");
+      const customTimeInput = document.getElementById("takeawayCustomTime");
+      if (customRow) {
+        customRow.classList.toggle("hidden", selectedTakeawayPreset !== "custom");
+      }
+      if (selectedTakeawayPreset === "custom" && customTimeInput && !customTimeInput.value) {
+        customTimeInput.value = getDefaultCustomPickupTimeStr();
+      }
+
+      const hint = document.getElementById("takeawayPickupSummaryHint");
+      if (hint) {
+        const labelText = getResolvedTakeawayPickupLabel();
+        hint.textContent = labelText ? `⏰ Estimasi ambil: ${labelText}` : "⏰ Pilih jam pengambilan di atas";
+      }
+    }
+
+    function selectTakeawayPickupPreset(preset) {
+      selectedTakeawayPreset = preset || "sekarang";
+      const customTimeInput = document.getElementById("takeawayCustomTime");
+      if (selectedTakeawayPreset === "custom" && customTimeInput && !customTimeInput.value) {
+        customTimeInput.value = getDefaultCustomPickupTimeStr();
+      }
+      renderTakeawayPickupUI();
+      saveCustomerDeliveryDraft();
+      if (selectedTakeawayPreset === "custom" && customTimeInput) {
+        customTimeInput.focus();
+      }
+    }
+
+    function onTakeawayCustomTimeChange() {
+      renderTakeawayPickupUI();
+      saveCustomerDeliveryDraft();
+    }
+
+    function getResolvedDineInTimeLabel() {
+      const selectEl = document.getElementById("dineInTimeSelect");
+      const preset = selectEl ? selectEl.value : "sekarang";
+      if (preset === "sekarang") {
+        return "Sekarang";
+      }
+      if (preset === "15m") {
+        return `15 Menit lagi (pukul ${formatClockOffset(15)} WIB)`;
+      }
+      if (preset === "30m") {
+        return `30 Menit lagi (pukul ${formatClockOffset(30)} WIB)`;
+      }
+      if (preset === "60m") {
+        return `1 Jam lagi (pukul ${formatClockOffset(60)} WIB)`;
+      }
+      const timeInput = document.getElementById("dineInCustomTime");
+      const rawTime = timeInput ? timeInput.value.trim() : "";
+      if (!rawTime) return "";
+      return `Pukul ${rawTime.replace(":", ".")} WIB (Custom)`;
+    }
+
+    function renderDineInTimeUI() {
+      const selectEl = document.getElementById("dineInTimeSelect");
+      const preset = selectEl ? selectEl.value : "sekarang";
+      const customRow = document.getElementById("dineInCustomTimeRow");
+      const customTimeInput = document.getElementById("dineInCustomTime");
+      if (customRow) {
+        customRow.classList.toggle("hidden", preset !== "custom");
+      }
+      if (preset === "custom" && customTimeInput && !customTimeInput.value) {
+        customTimeInput.value = getDefaultCustomPickupTimeStr();
+      }
+      const hint = document.getElementById("dineInTimeSummaryHint");
+      if (hint) {
+        const labelText = getResolvedDineInTimeLabel();
+        hint.textContent = labelText ? `⏰ Waktu makan di tempat: ${labelText}` : "⏰ Pilih jam kedatangan di atas";
+      }
+    }
+
+    function onDineInTimeSelectChange() {
+      renderDineInTimeUI();
+      saveCustomerDeliveryDraft();
+      const selectEl = document.getElementById("dineInTimeSelect");
+      const customTimeInput = document.getElementById("dineInCustomTime");
+      if (selectEl && selectEl.value === "custom" && customTimeInput) {
+        customTimeInput.focus();
+      }
+    }
+
+    function onDineInCustomTimeChange() {
+      renderDineInTimeUI();
+      saveCustomerDeliveryDraft();
+    }
+
+    function adjustDineInGuestCount(delta) {
+      const input = document.getElementById("dineInGuestCount");
+      if (!input) return;
+      const current = parseInt(input.value, 10);
+      const base = Number.isFinite(current) && current >= 1 ? current : 1;
+      const next = Math.max(1, Math.min(99, base + delta));
+      input.value = String(next);
+      saveCustomerDeliveryDraft();
+    }
+
+    function saveCustomerDeliveryDraft() {
+      try {
+        const payload = {
+          customerName: document.getElementById("customerName")?.value || "",
+          customerPhone: document.getElementById("customerPhone")?.value || "",
+          tableOrAddress: document.getElementById("tableOrAddress")?.value || "",
+          dineInGuestCount: document.getElementById("dineInGuestCount")?.value || "2",
+          dineInTimePreset: document.getElementById("dineInTimeSelect")?.value || "sekarang",
+          dineInCustomTime: document.getElementById("dineInCustomTime")?.value || "",
+          takeawayPreset: selectedTakeawayPreset || "sekarang",
+          takeawayCustomTime: document.getElementById("takeawayCustomTime")?.value || "",
+          orderType: document.getElementById("orderType")?.value || "delivery",
+          selectedDeliveryPin
+        };
+        localStorage.setItem("utori_customer_delivery_draft", JSON.stringify(payload));
+      } catch (e) {}
+    }
+
+    function restoreCustomerDeliveryDraft() {
+      try {
+        const raw = localStorage.getItem("utori_customer_delivery_draft");
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return;
+        const nameEl = document.getElementById("customerName");
+        const phoneEl = document.getElementById("customerPhone");
+        const addrEl = document.getElementById("tableOrAddress");
+        const guestEl = document.getElementById("dineInGuestCount");
+        const dineInTimeEl = document.getElementById("dineInTimeSelect");
+        const dineInCustomTimeEl = document.getElementById("dineInCustomTime");
+        const customTimeEl = document.getElementById("takeawayCustomTime");
+        const typeEl = document.getElementById("orderType");
+        if (nameEl && parsed.customerName) nameEl.value = parsed.customerName;
+        if (phoneEl && parsed.customerPhone) phoneEl.value = parsed.customerPhone;
+        if (addrEl && parsed.tableOrAddress) addrEl.value = parsed.tableOrAddress;
+        if (guestEl && parsed.dineInGuestCount) guestEl.value = parsed.dineInGuestCount;
+        if (dineInTimeEl && parsed.dineInTimePreset && ["sekarang", "15m", "30m", "60m", "custom"].includes(parsed.dineInTimePreset)) {
+          dineInTimeEl.value = parsed.dineInTimePreset;
+        }
+        if (dineInCustomTimeEl && parsed.dineInCustomTime) dineInCustomTimeEl.value = parsed.dineInCustomTime;
+        if (parsed.takeawayPreset && ["sekarang", "15m", "30m", "60m", "custom"].includes(parsed.takeawayPreset)) {
+          selectedTakeawayPreset = parsed.takeawayPreset;
+        }
+        if (customTimeEl && parsed.takeawayCustomTime) customTimeEl.value = parsed.takeawayCustomTime;
+        if (typeEl && parsed.orderType) typeEl.value = parsed.orderType;
+        if (
+          parsed.selectedDeliveryPin &&
+          Number.isFinite(Number(parsed.selectedDeliveryPin.lat)) &&
+          Number.isFinite(Number(parsed.selectedDeliveryPin.lng))
+        ) {
+          selectedDeliveryPin = {
+            lat: Number(parsed.selectedDeliveryPin.lat),
+            lng: Number(parsed.selectedDeliveryPin.lng),
+            mapsUrl:
+              parsed.selectedDeliveryPin.mapsUrl ||
+              `https://www.google.com/maps?q=${Number(parsed.selectedDeliveryPin.lat).toFixed(6)},${Number(parsed.selectedDeliveryPin.lng).toFixed(6)}`,
+            formattedAddress: parsed.selectedDeliveryPin.formattedAddress || ""
+          };
+        }
+        renderDeliveryPinSummaryUI();
+        renderTakeawayPickupUI();
+        renderDineInTimeUI();
+      } catch (e) {}
+    }
+
+    function renderDeliveryPinSummaryUI() {
+      const row = document.getElementById("deliveryMapPickerRow");
+      const badge = document.getElementById("deliveryMapStatusBadge");
+      const preview = document.getElementById("deliveryMapPinAddrPreview");
+      if (!row || !badge) return;
+
+      if (selectedDeliveryPin && Number.isFinite(selectedDeliveryPin.lat) && Number.isFinite(selectedDeliveryPin.lng)) {
+        row.classList.remove("border-amber-200", "bg-amber-50/70", "border-rose-400", "bg-rose-50");
+        row.classList.add("border-emerald-300", "bg-emerald-50/70");
+        badge.className = "text-[10px] text-emerald-800 font-bold truncate font-mono";
+        badge.textContent = `Pin: ${selectedDeliveryPin.lat.toFixed(5)}, ${selectedDeliveryPin.lng.toFixed(5)}`;
+        if (preview) {
+          if (selectedDeliveryPin.formattedAddress) {
+            preview.textContent = `📍 ${selectedDeliveryPin.formattedAddress}`;
+            preview.classList.remove("hidden");
+          } else {
+            preview.textContent = `📍 Koordinat Google Maps tersimpan`;
+            preview.classList.remove("hidden");
+          }
+        }
+      } else {
+        row.classList.remove("border-emerald-300", "bg-emerald-50/70");
+        row.classList.add("border-amber-200", "bg-amber-50/70");
+        badge.className = "text-[10px] text-amber-800 font-medium truncate";
+        badge.textContent = "Belum dipin — wajib pilih titik lokasi antar";
+        if (preview) {
+          preview.textContent = "";
+          preview.classList.add("hidden");
+        }
+      }
+    }
+
+    function updateMapModalPreview(pin) {
+      if (!pin) return;
+      draftDeliveryPin = pin;
+      const coordsEl = document.getElementById("deliveryMapModalCoords");
+      const addrEl = document.getElementById("deliveryMapModalAddress");
+      if (coordsEl) {
+        coordsEl.textContent = `${Number(pin.lat).toFixed(6)}, ${Number(pin.lng).toFixed(6)}`;
+      }
+      if (addrEl) {
+        addrEl.textContent = pin.formattedAddress
+          ? pin.formattedAddress
+          : "Titik koordinat dipilih. Anda bisa melengkapi detail patokan di kolom Alamat Lengkap.";
+      }
+    }
+
+    async function openDeliveryMapModal(autoGps = false) {
+      const backdrop = document.getElementById("deliveryMapModalBackdrop");
+      const mapCanvas = document.getElementById("deliveryGoogleMapCanvas");
+      const autocompleteHost = document.getElementById("deliveryMapAutocompleteHost");
+      const loadingOverlay = document.getElementById("deliveryMapLoadingOverlay");
+      const statusEl = document.getElementById("deliveryMapModalStatus");
+      if (!backdrop || !mapCanvas) return;
+
+      backdrop.classList.remove("pointer-events-none", "opacity-0");
+      backdrop.classList.add("opacity-100");
+      if (loadingOverlay) loadingOverlay.classList.remove("hidden");
+      if (statusEl) statusEl.textContent = "";
+
+      if (selectedDeliveryPin) {
+        updateMapModalPreview(selectedDeliveryPin);
+      } else {
+        draftDeliveryPin = null;
+      }
+
+      if (!window.UtoriDeliveryMap) {
+        if (loadingOverlay) loadingOverlay.classList.add("hidden");
+        if (statusEl) statusEl.textContent = "Modul Google Maps belum siap. Muat ulang halaman.";
+        return;
+      }
+
+      try {
+        await window.UtoriDeliveryMap.initPicker(
+          mapCanvas,
+          autocompleteHost,
+          {
+            onPinChange: (pin) => {
+              updateMapModalPreview(pin);
+            },
+            onStatusChange: (msg, isError) => {
+              if (!statusEl) return;
+              statusEl.textContent = msg || "";
+              statusEl.className = isError
+                ? "text-[10px] text-rose-600 font-semibold"
+                : "text-[10px] text-stone-500 italic";
+            }
+          },
+          selectedDeliveryPin
+        );
+        if (loadingOverlay) loadingOverlay.classList.add("hidden");
+        if (autoGps) {
+          await quickPinCurrentLocation(true);
+        }
+      } catch (err) {
+        console.error("Gagal memuat Google Maps picker:", err);
+        if (loadingOverlay) loadingOverlay.classList.add("hidden");
+        if (statusEl) {
+          statusEl.textContent = "Gagal memuat Google Maps. Periksa koneksi atau kuota API.";
+          statusEl.className = "text-[10px] text-rose-600 font-semibold";
+        }
+      }
+    }
+
+    function closeDeliveryMapModal() {
+      const backdrop = document.getElementById("deliveryMapModalBackdrop");
+      if (!backdrop) return;
+      backdrop.classList.remove("opacity-100");
+      backdrop.classList.add("opacity-0", "pointer-events-none");
+    }
+
+    function confirmDeliveryMapSelection() {
+      const fallbackPin =
+        draftDeliveryPin ||
+        (window.UtoriDeliveryMap ? window.UtoriDeliveryMap.getCurrentPin() : null);
+
+      if (!fallbackPin || !Number.isFinite(fallbackPin.lat) || !Number.isFinite(fallbackPin.lng)) {
+        showToast("⚠️ Silakan pilih atau geser pin titik pengantaran pada peta!", 3000);
+        return;
+      }
+
+      selectedDeliveryPin = {
+        lat: Number(fallbackPin.lat),
+        lng: Number(fallbackPin.lng),
+        mapsUrl:
+          fallbackPin.mapsUrl ||
+          `https://www.google.com/maps?q=${Number(fallbackPin.lat).toFixed(6)},${Number(fallbackPin.lng).toFixed(6)}`,
+        formattedAddress: fallbackPin.formattedAddress || ""
+      };
+
+      const addrInput = document.getElementById("tableOrAddress");
+      if (addrInput && !addrInput.value.trim() && selectedDeliveryPin.formattedAddress) {
+        addrInput.value = selectedDeliveryPin.formattedAddress;
+      }
+
+      renderDeliveryPinSummaryUI();
+      saveCustomerDeliveryDraft();
+      closeDeliveryMapModal();
+      showToast("📍 Titik pengantaran Google Maps berhasil dipasang!", 2500);
+    }
+
+    async function quickPinCurrentLocation(insideModal = false) {
+      if (!window.UtoriDeliveryMap) {
+        showToast("⚠️ Modul GPS Maps belum siap.", 3000);
+        return;
+      }
+      try {
+        showToast("📡 Mengambil lokasi GPS Anda...", 2000);
+        const pin = await window.UtoriDeliveryMap.requestCurrentPosition();
+        updateMapModalPreview(pin);
+        if (!insideModal) {
+          selectedDeliveryPin = pin;
+          const addrInput = document.getElementById("tableOrAddress");
+          if (addrInput && !addrInput.value.trim() && pin.formattedAddress) {
+            addrInput.value = pin.formattedAddress;
+          }
+          renderDeliveryPinSummaryUI();
+          saveCustomerDeliveryDraft();
+          showToast("📍 Titik GPS berhasil dipasang! Klik 'Pilih Titik' jika ingin geser pin.", 3200);
+        } else {
+          showToast("📍 Posisi peta dipindahkan ke lokasi GPS Anda.", 2500);
+        }
+      } catch (err) {
+        showToast(`⚠️ ${err && err.message ? err.message : "Gagal mengambil lokasi GPS."}`, 3500);
+      }
+    }
 
     function handleOrderTypeChange(type) {
       const label = document.getElementById("tableOrAddressLabel");
       const input = document.getElementById("tableOrAddress");
-      if (!label || !input) return;
+      const addressWrapper = document.getElementById("tableOrAddressWrapper");
+      const dineInGuestWrapper = document.getElementById("dineInGuestWrapper");
+      const takeawayPickupWrapper = document.getElementById("takeawayPickupWrapper");
+      const phoneWrapper = document.getElementById("customerPhoneWrapper");
+      const nameWrapper = document.getElementById("customerNameWrapper");
+      const mapRow = document.getElementById("deliveryMapPickerRow");
+      const courierNote = document.getElementById("deliveryCourierNote");
 
-      if (type === "dinein") {
-        label.textContent = "Nomor Meja *";
-        input.placeholder = "Meja 02 / Bar";
-      } else if (type === "takeaway") {
-        label.textContent = "Waktu Ambil *";
-        input.placeholder = "Pukul 12.30 WIB";
-      } else {
-        label.textContent = "Alamat Kirim *";
-        input.placeholder = "Jl. Sarimanah No. 10, Sarijadi";
+      const isDelivery = type === "delivery";
+      const isDineIn = type === "dinein";
+      const isTakeaway = type === "takeaway";
+
+      if (phoneWrapper) phoneWrapper.classList.toggle("hidden", !isDelivery);
+      if (nameWrapper) nameWrapper.classList.toggle("col-span-2", !isDelivery);
+      if (addressWrapper) addressWrapper.classList.toggle("hidden", !isDelivery);
+      if (mapRow) mapRow.classList.toggle("hidden", !isDelivery);
+      if (courierNote) courierNote.classList.toggle("hidden", !isDelivery);
+      if (dineInGuestWrapper) dineInGuestWrapper.classList.toggle("hidden", !isDineIn);
+      if (takeawayPickupWrapper) takeawayPickupWrapper.classList.toggle("hidden", !isTakeaway);
+
+      if (isDelivery && label && input) {
+        label.textContent = "Alamat Lengkap & Patokan *";
+        input.placeholder = "Jl. Sarimanah No. 10, Blok B2, pagar hitam...";
       }
+      if (isDineIn) {
+        renderDineInTimeUI();
+      }
+      if (isTakeaway) {
+        renderTakeawayPickupUI();
+      }
+
+      renderDeliveryPinSummaryUI();
+      saveCustomerDeliveryDraft();
+      if (window.lucide) window.lucide.createIcons();
     }
 
     function renderCartExtrasUI() {
@@ -4242,11 +5149,11 @@
         const itemSubtotal = (Number(extra.price) || 0) * qty;
 
         return `
-          <div class="flex items-center justify-between p-1.5 rounded-lg border text-xs transition ${isSelected ? 'bg-amber-50/80 border-amber-300 shadow-2xs' : 'bg-stone-50/70 border-stone-200 text-stone-600 hover:bg-stone-50'}">
+          <div class="flex items-center justify-between p-2.5 sm:p-3 rounded-xl border text-xs transition ${isSelected ? 'bg-amber-50/90 border-amber-300 shadow-xs' : 'bg-white border-stone-200 text-stone-600 hover:border-stone-300'}">
             <div class="min-w-0 flex-1 pr-2">
               <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="font-bold text-stone-900 text-[11px] truncate">${extra.name}</span>
-                <span class="text-[9px] px-1 py-0.2 rounded border font-mono font-bold ${priceBadgeClass}">
+                <span class="font-bold text-stone-900 text-xs truncate">${extra.name}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded border font-mono font-bold ${priceBadgeClass}">
                   ${unitPriceLabel}
                 </span>
               </div>
@@ -4412,12 +5319,16 @@
       }
 
       const nameInput = document.getElementById("customerName");
+      const phoneInput = document.getElementById("customerPhone");
       const tableOrAddressInput = document.getElementById("tableOrAddress");
+      const guestCountInput = document.getElementById("dineInGuestCount");
+      const customTimeInput = document.getElementById("takeawayCustomTime");
       const orderTypeSelect = document.getElementById("orderType");
       const notesInput = document.getElementById("orderNotes");
 
       const customerName = nameInput ? nameInput.value.trim() : "";
-      const location = tableOrAddressInput ? tableOrAddressInput.value.trim() : "";
+      const customerPhoneRaw = phoneInput ? phoneInput.value.trim() : "";
+      const customerPhoneDigits = customerPhoneRaw.replace(/[^0-9]/g, "");
       const orderType = orderTypeSelect ? orderTypeSelect.value : "delivery";
       const generalNotes = notesInput ? notesInput.value.trim() : "";
 
@@ -4427,12 +5338,73 @@
         return null;
       }
 
-      if (!location) {
-        const fieldName = orderType === 'dinein' ? 'Nomor Meja' : 'Alamat Pengantaran';
-        showToast(`⚠️ Mohon lengkapi ${fieldName} Anda!`, 3500);
-        if (tableOrAddressInput) tableOrAddressInput.focus();
-        return null;
+      let location = "";
+      let dineInGuestCountNum = null;
+      let dineInTimePreset = "";
+      let dineInTimeText = "";
+      let pickupTimePreset = "";
+
+      if (orderType === "delivery") {
+        location = tableOrAddressInput ? tableOrAddressInput.value.trim() : "";
+        if (!customerPhoneRaw || customerPhoneDigits.length < 9) {
+          showToast("⚠️ Khusus pesanan Delivery, wajib isi Nomor Telepon / WA yang aktif!", 3800);
+          if (phoneInput) phoneInput.focus();
+          return null;
+        }
+        if (!location || location.length < 8) {
+          showToast("⚠️ Mohon isi Alamat Lengkap pengantaran (nama jalan, nomor, & patokan)!", 3800);
+          if (tableOrAddressInput) tableOrAddressInput.focus();
+          return null;
+        }
+        if (
+          !selectedDeliveryPin ||
+          !Number.isFinite(selectedDeliveryPin.lat) ||
+          !Number.isFinite(selectedDeliveryPin.lng)
+        ) {
+          const mapRow = document.getElementById("deliveryMapPickerRow");
+          if (mapRow) {
+            mapRow.classList.remove("border-amber-200");
+            mapRow.classList.add("border-rose-400", "bg-rose-50");
+          }
+          showToast("⚠️ Wajib tentukan Titik Lokasi di Google Maps untuk pesanan Delivery!", 4000);
+          openDeliveryMapModal();
+          return null;
+        }
+      } else if (orderType === "dinein") {
+        const parsedGuests = parseInt(guestCountInput ? guestCountInput.value : "", 10);
+        if (!Number.isFinite(parsedGuests) || parsedGuests < 1) {
+          showToast("⚠️ Mohon isi Jumlah Orang minimal 1 orang untuk pesanan Dine-in!", 3500);
+          if (guestCountInput) guestCountInput.focus();
+          return null;
+        }
+        const dineInTimeSelectEl = document.getElementById("dineInTimeSelect");
+        const dineInCustomTimeEl = document.getElementById("dineInCustomTime");
+        dineInTimePreset = dineInTimeSelectEl ? dineInTimeSelectEl.value : "sekarang";
+        if (dineInTimePreset === "custom") {
+          const customDineVal = dineInCustomTimeEl ? dineInCustomTimeEl.value.trim() : "";
+          if (!customDineVal) {
+            showToast("⚠️ Mohon pilih jam untuk opsi Custom Waktu Makan di Tempat!", 3500);
+            if (dineInCustomTimeEl) dineInCustomTimeEl.focus();
+            return null;
+          }
+        }
+        dineInTimeText = getResolvedDineInTimeLabel();
+        dineInGuestCountNum = parsedGuests;
+        location = `${parsedGuests} Orang (${dineInTimeText})`;
+      } else if (orderType === "takeaway") {
+        pickupTimePreset = selectedTakeawayPreset || "sekarang";
+        if (pickupTimePreset === "custom") {
+          const customVal = customTimeInput ? customTimeInput.value.trim() : "";
+          if (!customVal) {
+            showToast("⚠️ Mohon pilih jam pengambilan untuk opsi Custom Jam!", 3500);
+            if (customTimeInput) customTimeInput.focus();
+            return null;
+          }
+        }
+        location = getResolvedTakeawayPickupLabel();
       }
+
+      saveCustomerDeliveryDraft();
 
       const totalCount = cart.reduce((acc, item) => acc + item.quantity, 0);
       const menuSubtotal = cart.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
@@ -4457,10 +5429,10 @@
 
       // Format sesuai skema WebOrder pada OrderSyncManager.kt di POS Android
       const tableNumber = orderType === "dinein"
-        ? `Meja ${location} (${customerName})`
+        ? `Dine-in ${dineInGuestCountNum} Orang (${dineInTimeText}) - ${customerName}`
         : orderType === "takeaway"
           ? `Takeaway - ${customerName} (${location})`
-          : `Delivery - ${customerName} (${location})`;
+          : `Delivery - ${customerName} (${customerPhoneRaw})`;
 
       const posItems = cart.map(item => {
         const opts = Object.values(item.selectedOptions || {}).filter(Boolean).join(", ");
@@ -4497,12 +5469,27 @@
       });
 
       const orderId = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const isDelivery = orderType === "delivery";
       const posPayload = {
         orderId,
         source: "website",
         status: "PENDING",
         tableNumber,
         customerName,
+        customerPhone: isDelivery ? customerPhoneRaw : "",
+        customerAddress: isDelivery ? location : "",
+        guestCount: orderType === "dinein" ? dineInGuestCountNum : null,
+        dineInTimePreset: orderType === "dinein" ? dineInTimePreset : "",
+        dineInTimeText: orderType === "dinein" ? dineInTimeText : "",
+        pickupTimePreset: orderType === "takeaway" ? pickupTimePreset : "",
+        pickupTimeText: orderType === "takeaway" ? location : "",
+        deliveryLat: isDelivery && selectedDeliveryPin ? selectedDeliveryPin.lat : null,
+        deliveryLng: isDelivery && selectedDeliveryPin ? selectedDeliveryPin.lng : null,
+        deliveryMapsUrl: isDelivery && selectedDeliveryPin ? selectedDeliveryPin.mapsUrl : "",
+        deliveryPinAddress: isDelivery && selectedDeliveryPin ? (selectedDeliveryPin.formattedAddress || "") : "",
+        shippingCarrier: isDelivery ? "GOJEK_GOSEND" : "",
+        driverPaymentMethod: isDelivery ? "CASH_BY_RECEIVER" : "",
+        shippingPaymentNote: isDelivery ? "Ongkir Gojek (GoSend) dibayar cash oleh penerima" : "",
         orderType,
         location,
         generalNotes,
@@ -4518,6 +5505,10 @@
         orderId,
         posPayload,
         customerName,
+        customerPhone: isDelivery ? customerPhoneRaw : "",
+        deliveryPin: isDelivery ? selectedDeliveryPin : null,
+        dineInGuestCount: dineInGuestCountNum,
+        dineInTimeText,
         location,
         orderType,
         generalNotes,
@@ -4595,6 +5586,10 @@
         orderId,
         posPayload,
         customerName,
+        customerPhone,
+        deliveryPin,
+        dineInGuestCount,
+        dineInTimeText,
         location,
         orderType,
         generalNotes,
@@ -4652,6 +5647,11 @@ ${extrasTotal > 0 ? `*Total Biaya Ekstra:* ${currencyFormatter.format(extrasTota
       });
 
       const greeting = getJapaneseGreetingByTime();
+      const deliveryDetailsText = orderType === 'delivery'
+        ? `- No. Telp / WA: *${customerPhone}*\n- Alamat Lengkap: *${location}*${deliveryPin ? `\n- Titik Google Maps: ${deliveryPin.mapsUrl}` : ''}\n- Kurir Gojek (GoSend): *Ongkir dibayar Cash oleh Penerima*`
+        : orderType === 'dinein'
+          ? `- Jumlah Orang: *${dineInGuestCount} Orang*\n- Pilihan Waktu: *${dineInTimeText}*`
+          : `- Waktu Ambil: *${location}*`;
 
       const messageText = 
 `${greeting} *${CONFIG.restaurantName}*! 🍱🍣
@@ -4672,7 +5672,7 @@ ${extrasTotal > 0 ? `_(Menu: ${currencyFormatter.format(menuSubtotal)} + Ekstra:
 
 👤 *DATA PEMESAN:*
 - Nama: *${customerName}*
-- ${orderType === 'dinein' ? 'Nomor Meja' : 'Alamat Kirim'}: *${location}*
+${deliveryDetailsText}
 ${generalNotes ? `• Catatan Khusus: _${generalNotes}_\n` : ''}
 Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! 🙏`;
 
@@ -4818,6 +5818,8 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       const mapsInput = document.getElementById("adminInputMapsUrl");
       if (mapsInput) mapsInput.value = CONFIG.mapsUrl || DEFAULT_CONFIG.mapsUrl;
       document.getElementById("adminInputHours").value = CONFIG.hours;
+      const showRatingsInput = document.getElementById("adminInputShowRatings");
+      if (showRatingsInput) showRatingsInput.checked = isRatingsEnabled();
 
       document.getElementById("changeAdminEmail").value = adminAuth.email;
       document.getElementById("changeAdminPass").value = "";
@@ -4858,6 +5860,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         const inputAddress = document.getElementById("adminInputAddress");
         const inputHours = document.getElementById("adminInputHours");
         const inputMaps = document.getElementById("adminInputMapsUrl");
+        const inputShowRatings = document.getElementById("adminInputShowRatings");
 
         if (inputStoreName && inputStoreName.value.trim()) CONFIG.restaurantName = inputStoreName.value.trim();
         if (inputTagline && inputTagline.value.trim()) CONFIG.tagline = inputTagline.value.trim();
@@ -4866,6 +5869,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         if (inputAddress && inputAddress.value.trim()) CONFIG.address = inputAddress.value.trim();
         if (inputHours && inputHours.value.trim()) CONFIG.hours = inputHours.value.trim();
         if (inputMaps && inputMaps.value.trim()) CONFIG.mapsUrl = inputMaps.value.trim();
+        if (inputShowRatings) CONFIG.showRatingsAndReviews = Boolean(inputShowRatings.checked);
 
         saveAdminConfig();
         saveAdminCategories();
@@ -4912,6 +5916,15 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
     }
 
 
+    function handleToggleShowRatings(enabled) {
+      CONFIG.showRatingsAndReviews = Boolean(enabled);
+      saveAdminConfig();
+      renderProducts();
+      renderPackageMenuCards();
+      renderHeroSlideshow();
+      showToast(enabled ? "Penilaian & ulasan produk diaktifkan." : "Penilaian & ulasan produk disembunyikan.");
+    }
+
     function saveStoreProfile() {
       const name = document.getElementById("adminInputStoreName").value.trim();
       const tagline = document.getElementById("adminInputTagline").value.trim();
@@ -4921,6 +5934,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       const mapsInput = document.getElementById("adminInputMapsUrl");
       const mapsUrl = mapsInput ? mapsInput.value.trim() : "";
       const hours = document.getElementById("adminInputHours").value.trim();
+      const showRatingsInput = document.getElementById("adminInputShowRatings");
 
       if (!name) return alert("Nama toko tidak boleh kosong!");
       if (!phone) return alert("Nomor WhatsApp tidak boleh kosong!");
@@ -4932,10 +5946,14 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       CONFIG.address = address;
       if (mapsUrl) CONFIG.mapsUrl = mapsUrl;
       CONFIG.hours = hours;
+      if (showRatingsInput) CONFIG.showRatingsAndReviews = Boolean(showRatingsInput.checked);
 
       saveAdminConfig();
       applyStoreConfigToUI();
-      showToast("Profil Toko & Titik Google Maps berhasil disimpan!");
+      renderProducts();
+      renderPackageMenuCards();
+      renderHeroSlideshow();
+      showToast("Profil Toko & Pengaturan Tampilan berhasil disimpan!");
     }
 
     function renderAdminCategoryList() {
@@ -5842,12 +6860,14 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
             ` : ''}
           </div>
 
-          <!-- Rating Badge on Image -->
-          <div class="absolute bottom-2.5 left-3 flex items-center gap-1.5 px-2.5 py-0.5 bg-black/75 backdrop-blur-md rounded-md text-[11px] text-amber-400 font-bold border border-white/10">
-            <i data-lucide="star" class="w-3.5 h-3.5 fill-amber-400 text-amber-400"></i>
-            <span class="text-white">${rating}</span>
-            <span class="text-stone-400 font-normal text-[10px]">(${reviews} ulasan)</span>
-          </div>
+          ${isRatingsEnabled() ? `
+            <!-- Rating Badge on Image -->
+            <div class="absolute bottom-2.5 left-3 flex items-center gap-1.5 px-2.5 py-0.5 bg-black/75 backdrop-blur-md rounded-md text-[11px] text-amber-400 font-bold border border-white/10">
+              <i data-lucide="star" class="w-3.5 h-3.5 fill-amber-400 text-amber-400"></i>
+              <span class="text-white">${rating}</span>
+              <span class="text-stone-400 font-normal text-[10px]">(${reviews} ulasan)</span>
+            </div>
+          ` : ''}
         </div>
 
         <!-- Title & Full Description -->
@@ -6154,12 +7174,14 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
                   ` : ''}
                 </div>
 
-                <!-- Rating Badge on Image -->
-                <div class="absolute bottom-2.5 left-3 flex items-center gap-1.5 px-2.5 py-0.5 bg-black/75 backdrop-blur-md rounded-md text-[11px] text-amber-400 font-bold border border-white/10">
-                  <i data-lucide="star" class="w-3.5 h-3.5 fill-amber-400 text-amber-400"></i>
-                  <span class="text-white">${rating}</span>
-                  <span class="text-stone-400 font-normal text-[10px]">(${reviews})</span>
-                </div>
+                ${isRatingsEnabled() ? `
+                  <!-- Rating Badge on Image -->
+                  <div class="absolute bottom-2.5 left-3 flex items-center gap-1.5 px-2.5 py-0.5 bg-black/75 backdrop-blur-md rounded-md text-[11px] text-amber-400 font-bold border border-white/10">
+                    <i data-lucide="star" class="w-3.5 h-3.5 fill-amber-400 text-amber-400"></i>
+                    <span class="text-white">${rating}</span>
+                    <span class="text-stone-400 font-normal text-[10px]">(${reviews})</span>
+                  </div>
+                ` : ''}
               </div>
 
               <!-- Content Zone -->
@@ -6915,7 +7937,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       renderAdminMenuList();
     }
 
-    function executeDeleteMenuItem(id) {
+    async function executeDeleteMenuItem(id) {
       const item = PRODUCTS.find(p => p.id === id);
       const itemName = item ? item.name : "Menu";
       
@@ -6923,17 +7945,18 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       cart = cart.filter(ci => ci.product.id !== id);
       pendingDeleteMenuId = null;
       
-      saveAdminProducts();
-      if (window.FirestoreSync && window.FirestoreSync.deleteProductFromFirestore) {
-        window.FirestoreSync.deleteProductFromFirestore(id);
-      }
+      saveAdminProductsLocalOnly();
       saveCartToStorage();
       renderAdminMenuList();
       renderProducts();
       renderHeroSlideshow();
       renderAdminSlideshowSettings();
       updateCartUI();
-      showToast(`Menu "${itemName}" berhasil dihapus!`);
+
+      if (window.FirestoreSync && window.FirestoreSync.deleteProductFromFirestore) {
+        await window.FirestoreSync.deleteProductFromFirestore(id);
+      }
+      showToast(`Menu "${itemName}" berhasil dihapus & disinkronkan ke Cloud!`);
     }
 
     function deleteMenuItem(id) {
@@ -7055,9 +8078,11 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
             <span class="px-2 py-0.5 bg-amber-500 text-stone-950 font-black text-[9px] rounded uppercase">
               ${item.badge || 'Menu Favorit'}
             </span>
-            <span class="text-[11px] font-semibold text-stone-300">
-              ★ ${item.rating || 4.9} (${item.reviewsCount || 100}+ ulasan)
-            </span>
+            ${isRatingsEnabled() ? `
+              <span class="text-[11px] font-semibold text-stone-300">
+                ★ ${item.rating || 4.9} (${item.reviewsCount || 100}+ ulasan)
+              </span>
+            ` : ''}
           </div>
           <div>
             <h3 class="font-display font-bold text-lg sm:text-2xl text-white tracking-tight leading-snug">
@@ -7487,11 +8512,29 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         }
       } catch (e) {}
 
-      PRODUCTS = PRODUCTS.map((p, idx) => normalizeProductRecord(p, idx));
+      // Migrasi ID bawaan lama (jp-1..jp-10) ke ID numerik (1..10) agar selaras dengan POS Android
+      const usedNumericIds = new Set(
+        PRODUCTS.map(p => String(p.id || "").trim()).filter(id => /^\d+$/.test(id))
+      );
+      PRODUCTS = PRODUCTS.map((p, idx) => {
+        const normalized = normalizeProductRecord(p, idx);
+        const jpMatch = String(normalized.id || "").match(/^jp-(\d+)$/i);
+        if (jpMatch) {
+          const candidateId = String(parseInt(jpMatch[1], 10));
+          if (!usedNumericIds.has(candidateId)) {
+            normalized.id = candidateId;
+            usedNumericIds.add(candidateId);
+          }
+        }
+        if (normalized.category) {
+          normalized.category = resolveCategoryLabel(normalized.category);
+        }
+        return normalized;
+      });
       const anyFeatured = PRODUCTS.some(p => p.featuredInHero === true);
       if (!anyFeatured) {
         PRODUCTS.forEach((p, idx) => {
-          p.featuredInHero = (p.id === 'jp-2' || p.id === 'jp-1' || p.id === 'jp-5' || p.id === 'jp-6' || idx < 4);
+          p.featuredInHero = (p.id === '2' || p.id === '1' || p.id === '5' || p.id === '6' || idx < 4);
         });
       }
       saveAdminProductsLocalOnly();
@@ -7564,10 +8607,15 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
 
     window.onFirestoreConfigUpdate = function(newConfig) {
       if (!newConfig) return;
-      CONFIG = { ...CONFIG, ...newConfig };
+      CONFIG = { ...DEFAULT_CONFIG, ...CONFIG, ...newConfig };
       window.CONFIG = CONFIG;
       try { localStorage.setItem("shinzan_admin_config", JSON.stringify(CONFIG)); } catch (e) {}
+      const showRatingsInput = document.getElementById("adminInputShowRatings");
+      if (showRatingsInput) showRatingsInput.checked = isRatingsEnabled();
       applyStoreConfigToUI();
+      renderProducts();
+      renderPackageMenuCards();
+      renderHeroSlideshow();
     };
 
     function ensureCategoryNamesExist(catNames) {
@@ -7612,9 +8660,36 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
       }
     };
 
+    let hasMigratedLegacyJpIdsInCloud = false;
+
+    function migrateLegacyProductIds(list) {
+      const usedNumericIds = new Set(
+        list.map(p => String(p?.id || "").trim()).filter(id => /^\d+$/.test(id))
+      );
+      let migratedAny = false;
+      const mapped = list.map((p, idx) => {
+        const normalized = normalizeProductRecord(p, idx);
+        const jpMatch = String(normalized.id || "").match(/^jp-(\d+)$/i);
+        if (jpMatch) {
+          const candidateId = String(parseInt(jpMatch[1], 10));
+          if (!usedNumericIds.has(candidateId)) {
+            normalized.id = candidateId;
+            usedNumericIds.add(candidateId);
+            migratedAny = true;
+          }
+        }
+        if (normalized.category) {
+          normalized.category = resolveCategoryLabel(normalized.category);
+        }
+        return normalized;
+      });
+      return { mapped, migratedAny };
+    }
+
     window.onFirestoreProductsUpdate = function(newProducts) {
-      if (!Array.isArray(newProducts) || newProducts.length === 0) return;
-      PRODUCTS = newProducts.map((p, idx) => normalizeProductRecord(p, idx));
+      if (!Array.isArray(newProducts)) return;
+      const { mapped, migratedAny } = migrateLegacyProductIds(newProducts);
+      PRODUCTS = mapped;
       window.PRODUCTS = PRODUCTS;
       const productCats = PRODUCTS.map(p => p.category).filter(c => c && !String(c).startsWith("cat_"));
       if (ensureCategoryNamesExist(productCats)) {
@@ -7622,6 +8697,10 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         renderAdminCategoryList();
       }
       try { localStorage.setItem("shinzan_admin_products", JSON.stringify(PRODUCTS)); } catch (e) {}
+      if (migratedAny && !hasMigratedLegacyJpIdsInCloud && window.FirestoreSync && window.FirestoreSync.syncProductsToFirestore) {
+        hasMigratedLegacyJpIdsInCloud = true;
+        window.FirestoreSync.syncProductsToFirestore(PRODUCTS);
+      }
       renderProducts();
       renderAdminMenuList();
       renderAdminSlideshowSettings();
@@ -7630,7 +8709,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
     };
 
     window.onFirestoreExtrasUpdate = function(newExtras) {
-      if (!Array.isArray(newExtras) || newExtras.length === 0) return;
+      if (!Array.isArray(newExtras)) return;
       EXTRAS = newExtras;
       window.EXTRAS = EXTRAS;
       try { localStorage.setItem("utori_admin_extras", JSON.stringify(EXTRAS)); } catch (e) {}
@@ -7640,7 +8719,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
     };
 
     window.onFirestorePackagesUpdate = function(newPackages) {
-      if (!Array.isArray(newPackages) || newPackages.length === 0) return;
+      if (!Array.isArray(newPackages)) return;
       PACKAGE_MENUS = newPackages;
       window.PACKAGE_MENUS = PACKAGE_MENUS;
       try { localStorage.setItem("utori_package_menus", JSON.stringify(PACKAGE_MENUS)); } catch (e) {}
@@ -7677,6 +8756,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         const inputAddress = document.getElementById("adminInputAddress");
         const inputHours = document.getElementById("adminInputHours");
         const inputMaps = document.getElementById("adminInputMapsUrl");
+        const inputShowRatings = document.getElementById("adminInputShowRatings");
 
         if (inputStoreName && inputStoreName.value.trim()) CONFIG.restaurantName = inputStoreName.value.trim();
         if (inputTagline && inputTagline.value.trim()) CONFIG.tagline = inputTagline.value.trim();
@@ -7685,6 +8765,7 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         if (inputAddress && inputAddress.value.trim()) CONFIG.address = inputAddress.value.trim();
         if (inputHours && inputHours.value.trim()) CONFIG.hours = inputHours.value.trim();
         if (inputMaps && inputMaps.value.trim()) CONFIG.mapsUrl = inputMaps.value.trim();
+        if (inputShowRatings) CONFIG.showRatingsAndReviews = Boolean(inputShowRatings.checked);
 
         // 2. Simpan ke local storage terlebih dahulu (agar data 100% aman tersimpan di browser)
         localStorage.setItem("shinzan_admin_config", JSON.stringify(CONFIG));
@@ -7799,7 +8880,17 @@ Mohon konfirmasi pesanan dan estimasi waktu penyajiannya. Arigatou gozaimasu! �
         const saved = localStorage.getItem("shinzan_sushi_cart");
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) cart = parsed;
+          if (Array.isArray(parsed)) {
+            cart = parsed.map(ci => {
+              if (ci && ci.product && typeof ci.product.id === "string") {
+                const jpMatch = ci.product.id.match(/^jp-(\d+)$/i);
+                if (jpMatch) {
+                  ci.product.id = String(parseInt(jpMatch[1], 10));
+                }
+              }
+              return ci;
+            });
+          }
         }
       } catch (e) {
         cart = [];

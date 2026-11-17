@@ -1,0 +1,897 @@
+package com.example.utoripos.data
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
+import android.util.Log
+import android.widget.ImageView
+import com.google.firebase.FirebaseApp
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
+import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.net.URL
+import java.text.NumberFormat
+import java.util.Locale
+import java.util.UUID
+
+object CloudSyncManager {
+
+    private const val TAG = "CloudSyncManager"
+    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private var productsListener: ListenerRegistration? = null
+    private var categoriesListener: ListenerRegistration? = null
+    private var categoriesListListener: ListenerRegistration? = null
+
+    private fun isFirebaseReady(context: Context): Boolean {
+        return try {
+            FirebaseApp.getApps(context).isNotEmpty()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun firestore(): FirebaseFirestore = FirebaseFirestore.getInstance()
+
+    /**
+     * Menyimpan file gambar yang dipilih dari galeri/kamera ke penyimpanan internal.
+     */
+    suspend fun persistImageLocally(context: Context, sourceUri: Uri): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val inputStream = context.contentResolver.openInputStream(sourceUri) ?: return@withContext null
+                val imagesDir = File(context.filesDir, "product_images").apply {
+                    if (!exists()) mkdirs()
+                }
+                val fileName = "prod_${UUID.randomUUID()}.webp"
+                val destFile = File(imagesDir, fileName)
+
+                FileOutputStream(destFile).use { output ->
+                    inputStream.copyTo(output)
+                }
+
+                destFile.absolutePath
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal menyimpan gambar secara lokal", e)
+                null
+            }
+        }
+    }
+
+    /**
+     * Menampilkan preview foto di dialog Edit Produk (mendukung path lokal, Base64 Data URL, maupun URL https).
+     */
+    fun loadPreviewIntoImageView(imageView: ImageView, imageUri: String?, fallbackResId: Int) {
+        if (imageUri.isNullOrBlank()) {
+            imageView.setImageResource(fallbackResId)
+            return
+        }
+        try {
+            when {
+                imageUri.startsWith("data:image/") -> {
+                    val base64Part = imageUri.substringAfter("base64,", "")
+                    if (base64Part.isNotEmpty()) {
+                        val bytes = Base64.decode(base64Part, Base64.DEFAULT)
+                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (bmp != null) imageView.setImageBitmap(bmp) else imageView.setImageResource(fallbackResId)
+                    } else {
+                        imageView.setImageResource(fallbackResId)
+                    }
+                }
+                imageUri.startsWith("http://") || imageUri.startsWith("https://") -> {
+                    syncScope.launch {
+                        val bmp = try {
+                            URL(imageUri).openStream().use { BitmapFactory.decodeStream(it) }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        withContext(Dispatchers.Main) {
+                            if (bmp != null) imageView.setImageBitmap(bmp) else imageView.setImageResource(fallbackResId)
+                        }
+                    }
+                }
+                else -> {
+                    imageView.setImageURI(Uri.parse(imageUri))
+                }
+            }
+        } catch (_: Exception) {
+            imageView.setImageResource(fallbackResId)
+        }
+    }
+
+    /**
+     * Mengunggah foto ke Firebase Storage; jika gagal / Storage belum aktif di plan Spark,
+     * otomatis fallback ke Data URL JPEG terkompresi agar foto tetap tampil di Website.
+     */
+    suspend fun uploadProductImage(context: Context, localPathOrUri: String?): String? {
+        if (localPathOrUri.isNullOrBlank()) return null
+        if (localPathOrUri.startsWith("http://") ||
+            localPathOrUri.startsWith("https://") ||
+            localPathOrUri.startsWith("data:image/")
+        ) {
+            return localPathOrUri
+        }
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val uri = if (localPathOrUri.startsWith("content://") || localPathOrUri.startsWith("file://")) {
+                    Uri.parse(localPathOrUri)
+                } else {
+                    Uri.fromFile(File(localPathOrUri))
+                }
+                val ref = FirebaseStorage.getInstance().reference
+                    .child("product_images/${UUID.randomUUID()}.webp")
+                ref.putFile(uri).await()
+                ref.downloadUrl.await().toString()
+            } catch (storageErr: Exception) {
+                Log.w(TAG, "Storage upload dilewati, memakai fallback Base64 terkompresi", storageErr)
+                encodeCompressedDataUrl(context, localPathOrUri)
+            }
+        }
+    }
+
+    private fun encodeCompressedDataUrl(context: Context, pathOrUri: String): String? {
+        return try {
+            val bitmap = if (pathOrUri.startsWith("content://")) {
+                context.contentResolver.openInputStream(Uri.parse(pathOrUri))?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            } else {
+                BitmapFactory.decodeFile(pathOrUri.removePrefix("file://"))
+            } ?: return null
+
+            val maxDim = 640
+            val scale = minOf(maxDim.toFloat() / bitmap.width, maxDim.toFloat() / bitmap.height, 1f)
+            val resized = if (scale < 1f) {
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * scale).toInt().coerceAtLeast(1),
+                    (bitmap.height * scale).toInt().coerceAtLeast(1),
+                    true
+                )
+            } else {
+                bitmap
+            }
+
+            val baos = ByteArrayOutputStream()
+            resized.compress(Bitmap.CompressFormat.JPEG, 72, baos)
+            val base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+            "data:image/jpeg;base64,$base64"
+        } catch (e: Exception) {
+            Log.e(TAG, "Gagal kompres gambar ke Data URL", e)
+            null
+        }
+    }
+
+    // ==================== HELPER KONVERSI VARIASI ====================
+
+    private fun formatRupiahPrice(amount: Double): String {
+        val formatter = NumberFormat.getNumberInstance(Locale("id", "ID"))
+        return formatter.format(amount.toLong())
+    }
+
+    private fun buildModifierGroupsPayload(groups: List<ModifierGroupWithOptions>): List<Map<String, Any>> {
+        return groups.map { item ->
+            mapOf(
+                "id" to item.group.id,
+                "name" to item.group.name,
+                "selectionType" to item.group.selectionType,
+                "required" to item.group.required,
+                "options" to item.options.map { opt ->
+                    mapOf(
+                        "id" to opt.id,
+                        "name" to opt.name,
+                        "price" to opt.price
+                    )
+                }
+            )
+        }
+    }
+
+    private fun buildWebsiteOptionsPayload(groups: List<ModifierGroupWithOptions>): List<Map<String, Any>> {
+        return groups.map { item ->
+            val choices = item.options.map { opt ->
+                if (opt.price > 0) {
+                    "${opt.name} (+Rp ${formatRupiahPrice(opt.price)})"
+                } else {
+                    opt.name
+                }
+            }
+            mapOf(
+                "name" to item.group.name,
+                "required" to item.group.required,
+                "selectionType" to item.group.selectionType,
+                "choices" to choices
+            )
+        }
+    }
+
+    private fun parseChoiceLabelAndPrice(rawChoice: String): Pair<String, Double> {
+        val trimmed = rawChoice.trim()
+        val regex = Regex("""^(.*?)\s*\(\s*\+\s*(?:Rp\.?\s*)?([\d.,]+)\s*(k|rb|ribu)?\s*\)$""", RegexOption.IGNORE_CASE)
+        val match = regex.find(trimmed)
+        if (match != null) {
+            val label = match.groupValues[1].trim()
+            val rawNum = match.groupValues[2].replace(".", "").replace(",", "")
+            var price = rawNum.toDoubleOrNull() ?: 0.0
+            val unit = match.groupValues[3].lowercase()
+            if (unit == "k" || unit == "rb" || unit == "ribu") {
+                if (price < 1000) price *= 1000
+            }
+            return label to price
+        }
+        return trimmed to 0.0
+    }
+
+    // ==================== SINKRONISASI UPLOAD (POS -> FIRESTORE) ====================
+
+    suspend fun syncProductToCloud(context: Context, product: Product) {
+        if (!isFirebaseReady(context) || product.id <= 0) return
+        withContext(Dispatchers.IO) {
+            try {
+                val db = AppDatabase.getDatabase(context)
+                val groups = db.modifierDao().getGroupsForProduct(product.id)
+                val cloudImage = uploadProductImage(context, product.imageUri)
+
+                val simpleVariations = if (product.hasVariations &&
+                    product.variations.isNotBlank() &&
+                    !product.variations.equals("Tanpa Varian", ignoreCase = true) &&
+                    !product.variations.equals("Belum ada variasi", ignoreCase = true)
+                ) {
+                    product.variations.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                } else {
+                    emptyList()
+                }
+
+                val modifierGroupsMap: List<Map<String, Any>>
+                val websiteOptionsMap: List<Map<String, Any>>
+
+                if (groups.isNotEmpty()) {
+                    modifierGroupsMap = buildModifierGroupsPayload(groups)
+                    websiteOptionsMap = buildWebsiteOptionsPayload(groups)
+                } else if (simpleVariations.isNotEmpty()) {
+                    modifierGroupsMap = emptyList()
+                    websiteOptionsMap = listOf(
+                        mapOf(
+                            "name" to "Pilihan Variasi",
+                            "source" to "simple",
+                            "required" to true,
+                            "selectionType" to "SINGLE",
+                            "choices" to simpleVariations
+                        )
+                    )
+                } else {
+                    modifierGroupsMap = emptyList()
+                    websiteOptionsMap = emptyList()
+                }
+
+                val hasVars = groups.isNotEmpty() || simpleVariations.isNotEmpty()
+                val variationSummary = when {
+                    groups.isNotEmpty() -> groups.joinToString(", ") { it.group.name }
+                    simpleVariations.isNotEmpty() -> simpleVariations.joinToString(", ")
+                    else -> "Tanpa Varian"
+                }
+
+                val now = System.currentTimeMillis()
+                val payload = hashMapOf<String, Any?>(
+                    "id" to product.id.toString(),
+                    "name" to product.name,
+                    "price" to product.price,
+                    "stock" to product.stock,
+                    "category" to product.category,
+                    "variations" to variationSummary,
+                    "hasVariations" to hasVars,
+                    "modifierGroups" to modifierGroupsMap,
+                    "options" to websiteOptionsMap,
+                    "imageIcon" to product.imageIcon,
+                    "updatedAt" to now
+                )
+                if (!cloudImage.isNullOrBlank()) {
+                    payload["image"] = cloudImage
+                    payload["imageUri"] = cloudImage
+                }
+
+                firestore().collection("products")
+                    .document(product.id.toString())
+                    .set(payload, SetOptions.merge())
+                    .await()
+
+                db.productDao().updateProduct(
+                    product.copy(
+                        variations = variationSummary,
+                        hasVariations = hasVars,
+                        imageUri = cloudImage ?: product.imageUri,
+                        isSynced = true,
+                        updatedAt = now
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal sync produk ${product.name} ke Firestore", e)
+            }
+        }
+    }
+
+    /**
+     * Menghapus sebuah grup variasi dari SELURUH produk di Firestore & Room lokal
+     * agar grup yang sudah dihapus tidak pernah ditarik kembali.
+     */
+    suspend fun removeModifierGroupFromAllCloudProducts(context: Context, groupName: String) {
+        if (!isFirebaseReady(context)) return
+        withContext(Dispatchers.IO) {
+            try {
+                val db = AppDatabase.getDatabase(context)
+                val productDao = db.productDao()
+                val modifierDao = db.modifierDao()
+                val now = System.currentTimeMillis()
+
+                val localProducts = productDao.getAllProducts().first()
+                for (prod in localProducts) {
+                    val remainingGroups = modifierDao.getGroupsForProduct(prod.id)
+                    val cleanedTextParts = prod.variations
+                        .split(",")
+                        .map { it.trim() }
+                        .filter {
+                            it.isNotBlank() &&
+                                    !it.equals(groupName, ignoreCase = true) &&
+                                    !it.equals("Tanpa Varian", ignoreCase = true)
+                        }
+
+                    val newHasVars: Boolean
+                    val newVariationsText: String
+                    if (remainingGroups.isNotEmpty()) {
+                        newHasVars = true
+                        newVariationsText = remainingGroups.joinToString(", ") { it.group.name }
+                    } else if (groupName.equals("Pilihan Variasi", ignoreCase = true) || cleanedTextParts.isEmpty()) {
+                        newHasVars = false
+                        newVariationsText = "Tanpa Varian"
+                    } else {
+                        newHasVars = true
+                        newVariationsText = cleanedTextParts.joinToString(", ")
+                    }
+
+                    if (newHasVars != prod.hasVariations || newVariationsText != prod.variations) {
+                        productDao.updateProduct(
+                            prod.copy(
+                                variations = newVariationsText,
+                                hasVariations = newHasVars,
+                                isSynced = true,
+                                updatedAt = now
+                            )
+                        )
+                    }
+                }
+
+                val snaps = firestore().collection("products").get().await()
+                for (docSnap in snaps.documents) {
+                    val data = docSnap.data ?: continue
+                    val rawModGroups = (data["modifierGroups"] as? List<*>)?.mapNotNull { it as? Map<*, *> } ?: emptyList()
+                    val rawOptions = (data["options"] as? List<*>)?.mapNotNull { it as? Map<*, *> } ?: emptyList()
+
+                    val hadInGroups = rawModGroups.any {
+                        it["name"]?.toString()?.trim().equals(groupName, ignoreCase = true)
+                    }
+                    val hadInOptions = rawOptions.any {
+                        it["name"]?.toString()?.trim().equals(groupName, ignoreCase = true)
+                    }
+                    val currentVarText = data["variations"]?.toString().orEmpty()
+                    val hadInVarText = currentVarText.contains(groupName, ignoreCase = true)
+
+                    if (!hadInGroups && !hadInOptions && !hadInVarText) continue
+
+                    val filteredModGroups = rawModGroups.filterNot {
+                        it["name"]?.toString()?.trim().equals(groupName, ignoreCase = true)
+                    }
+                    val filteredOptions = rawOptions.filterNot {
+                        it["name"]?.toString()?.trim().equals(groupName, ignoreCase = true)
+                    }
+
+                    val stillHasVars = filteredModGroups.isNotEmpty() || filteredOptions.isNotEmpty()
+                    val updatedVarText = when {
+                        filteredModGroups.isNotEmpty() ->
+                            filteredModGroups.mapNotNull { it["name"]?.toString()?.trim() }.joinToString(", ")
+                        filteredOptions.isNotEmpty() ->
+                            filteredOptions.mapNotNull { it["name"]?.toString()?.trim() }.joinToString(", ")
+                        else -> "Tanpa Varian"
+                    }
+
+                    docSnap.reference.set(
+                        mapOf(
+                            "modifierGroups" to filteredModGroups,
+                            "options" to filteredOptions,
+                            "hasVariations" to stillHasVars,
+                            "variations" to updatedVarText,
+                            "updatedAt" to now
+                        ),
+                        SetOptions.merge()
+                    ).await()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal membersihkan grup '$groupName' di Firestore", e)
+            }
+        }
+    }
+
+    suspend fun syncAllProductsToCloud(context: Context) {
+        if (!isFirebaseReady(context)) return
+        withContext(Dispatchers.IO) {
+            val products = AppDatabase.getDatabase(context).productDao().getAllProducts().first()
+            products.forEach { syncProductToCloud(context, it) }
+            syncCategoriesToCloud(context)
+        }
+    }
+
+    suspend fun deleteProductFromCloud(context: Context, productId: Int) {
+        if (productId <= 0) return
+        CatalogPreferences.addDeletedProductId(context, productId)
+        if (!isFirebaseReady(context)) return
+        withContext(Dispatchers.IO) {
+            try {
+                firestore().collection("products")
+                    .document(productId.toString())
+                    .delete()
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal hapus produk $productId di Firestore", e)
+            }
+        }
+    }
+
+    suspend fun syncCategoriesToCloud(context: Context) {
+        if (!isFirebaseReady(context)) return
+        withContext(Dispatchers.IO) {
+            try {
+                val categories = CatalogPreferences.getCategories(context)
+                firestore().collection("settings")
+                    .document("categories")
+                    .set(
+                        mapOf(
+                            "list" to categories,
+                            "updatedAt" to System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    )
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal sync kategori ke Firestore", e)
+            }
+        }
+    }
+
+    suspend fun deleteCategoryFromCloud(context: Context, categoryName: String) {
+        if (!isFirebaseReady(context)) return
+        withContext(Dispatchers.IO) {
+            try {
+                syncCategoriesToCloud(context)
+                val snaps = firestore().collection("categories").get().await()
+                for (docSnap in snaps.documents) {
+                    val remoteName = docSnap.getString("name")?.trim() ?: continue
+                    if (remoteName.equals(categoryName, ignoreCase = true)) {
+                        docSnap.reference.delete().await()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal hapus kategori $categoryName di Firestore", e)
+            }
+        }
+    }
+
+    // ==================== SINKRONISASI REAL-TIME (FIRESTORE -> POS) ====================
+
+    fun startRealtimeCatalogSync(context: Context) {
+        val appContext = context.applicationContext
+        if (!isFirebaseReady(appContext)) return
+        stopRealtimeCatalogSync()
+
+        categoriesListListener = firestore().collection("settings")
+            .document("categories")
+            .addSnapshotListener { snap, err ->
+                if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+                val rawList = snap.get("list") as? List<*> ?: return@addSnapshotListener
+                val names = rawList.mapNotNull { it?.toString()?.trim() }.filter { it.isNotEmpty() }
+                if (names.isNotEmpty()) {
+                    CatalogPreferences.saveCategories(appContext, names)
+                }
+            }
+
+        categoriesListener = firestore().collection("categories")
+            .addSnapshotListener { snaps, err ->
+                if (err != null || snaps == null || snaps.isEmpty) return@addSnapshotListener
+                val sortedNames = snaps.documents
+                    .sortedBy { it.getLong("sortIndex") ?: 999L }
+                    .mapNotNull { it.getString("name")?.trim() }
+                    .filter { it.isNotEmpty() }
+                if (sortedNames.isNotEmpty()) {
+                    val merged = (CatalogPreferences.getCategories(appContext) + sortedNames)
+                        .distinctBy { it.lowercase() }
+                    CatalogPreferences.saveCategories(appContext, merged)
+                }
+            }
+
+        productsListener = firestore().collection("products")
+            .addSnapshotListener { snaps, err ->
+                if (err != null || snaps == null) return@addSnapshotListener
+                syncScope.launch {
+                    applyRemoteProductsToRoom(appContext, snaps.documents)
+                }
+            }
+    }
+
+    fun stopRealtimeCatalogSync() {
+        productsListener?.remove()
+        categoriesListener?.remove()
+        categoriesListListener?.remove()
+        productsListener = null
+        categoriesListener = null
+        categoriesListListener = null
+    }
+
+    private suspend fun applyRemoteProductsToRoom(
+        context: Context,
+        docs: List<DocumentSnapshot>
+    ) {
+        val db = AppDatabase.getDatabase(context)
+        val productDao = db.productDao()
+        val modifierDao = db.modifierDao()
+
+        val deletedIds = CatalogPreferences.getDeletedProductIds(context)
+        val localProducts = productDao.getAllProducts().first()
+        val localById = localProducts.associateBy { it.id }
+
+        val discoveredCategories = mutableListOf<String>()
+
+        for (docSnap in docs) {
+            val data = docSnap.data ?: continue
+            val rawId = docSnap.id.toIntOrNull()
+                ?: data["id"]?.toString()?.toIntOrNull()
+                ?: continue
+
+            val existing = localById[rawId]
+            if (rawId in deletedIds) {
+                if (existing != null) {
+                    productDao.deleteProduct(existing)
+                }
+                continue
+            }
+
+            val remoteUpdatedAt = when (val u = data["updatedAt"]) {
+                is Number -> u.toLong()
+                else -> 0L
+            }
+
+            if (existing != null && remoteUpdatedAt > 0L && existing.updatedAt >= remoteUpdatedAt && existing.isSynced) {
+                continue
+            }
+
+            val name = data["name"]?.toString()?.trim()?.ifEmpty { null } ?: continue
+            val price = (data["price"] as? Number)?.toDouble() ?: 0.0
+            val stock = (data["stock"] as? Number)?.toInt() ?: (existing?.stock ?: 10)
+            val category = data["category"]?.toString()?.trim()?.ifEmpty { null } ?: "Umum"
+            val imageUrl = data["image"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: data["imageUri"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: existing?.imageUri
+            val imageIcon = data["imageIcon"]?.toString()?.ifEmpty { null } ?: "ic_fastfood"
+
+            discoveredCategories.add(category)
+
+            val explicitHasVar = data["hasVariations"] as? Boolean
+            val parsedGroups = if (explicitHasVar == false) emptyList() else parseRemoteModifierGroups(data)
+            val simpleChoices = extractSimpleVariations(data)
+
+            val hasVars = explicitHasVar ?: (parsedGroups.isNotEmpty() || simpleChoices.isNotEmpty())
+            val variationsText = when {
+                !hasVars -> "Tanpa Varian"
+                simpleChoices.isNotEmpty() -> simpleChoices.joinToString(", ")
+                parsedGroups.isNotEmpty() -> parsedGroups.joinToString(", ") { it.first }
+                else -> data["variations"]?.toString()?.takeIf { it.isNotBlank() } ?: "Tanpa Varian"
+            }
+
+            val entity = Product(
+                id = rawId,
+                name = name,
+                price = price,
+                stock = stock,
+                category = category,
+                variations = variationsText,
+                hasVariations = hasVars,
+                imageUri = imageUrl,
+                imageIcon = imageIcon,
+                isSynced = true,
+                updatedAt = if (remoteUpdatedAt > 0L) remoteUpdatedAt else System.currentTimeMillis()
+            )
+            productDao.insertProduct(entity)
+
+            syncModifierGroupsToRoom(modifierDao, rawId, parsedGroups)
+        }
+
+        if (discoveredCategories.isNotEmpty()) {
+            val currentCats = CatalogPreferences.getCategories(context)
+            val mergedCats = (currentCats + discoveredCategories).distinctBy { it.lowercase() }
+            if (mergedCats.size != currentCats.size) {
+                CatalogPreferences.saveCategories(context, mergedCats)
+            }
+        }
+    }
+
+    private fun extractSimpleVariations(data: Map<String, Any>): List<String> {
+        val rawOptions = data["options"] as? List<*> ?: return emptyList()
+        for (o in rawOptions) {
+            val map = o as? Map<*, *> ?: continue
+            val isSimple = map["source"]?.toString() == "simple" ||
+                    map["name"]?.toString()?.trim().equals("Pilihan Variasi", ignoreCase = true)
+            if (isSimple) {
+                return (map["choices"] as? List<*>)
+                    ?.mapNotNull { it?.toString()?.trim()?.ifEmpty { null } }
+                    ?: emptyList()
+            }
+        }
+        return emptyList()
+    }
+
+    private fun parseRemoteModifierGroups(
+        data: Map<String, Any>
+    ): List<Triple<String, Pair<String, Boolean>, List<Pair<String, Double>>>> {
+        val result = mutableListOf<Triple<String, Pair<String, Boolean>, List<Pair<String, Double>>>>()
+
+        fun parseOptionItem(item: Any?): Pair<String, Double>? {
+            if (item == null) return null
+            if (item is String) {
+                val trimmed = item.trim()
+                if (trimmed.isEmpty()) return null
+                return parseChoiceLabelAndPrice(trimmed)
+            }
+            if (item is Map<*, *>) {
+                val name = item["name"]?.toString()?.trim()
+                    ?: item["label"]?.toString()?.trim()
+                    ?: item["title"]?.toString()?.trim()
+                    ?: item["choice"]?.toString()?.trim()
+                    ?: item["optionName"]?.toString()?.trim()
+                    ?: return null
+                if (name.isEmpty()) return null
+
+                val price = (item["price"] as? Number)?.toDouble()
+                    ?: (item["priceAdjustment"] as? Number)?.toDouble()
+                    ?: (item["extraPrice"] as? Number)?.toDouble()
+                    ?: (item["additionalPrice"] as? Number)?.toDouble()
+                    ?: parseChoiceLabelAndPrice(name).second
+
+                val cleanName = parseChoiceLabelAndPrice(name).first
+                return cleanName to price
+            }
+            return null
+        }
+
+        val rawModGroups = data["modifierGroups"] as? List<*> ?: data["groups"] as? List<*>
+        if (!rawModGroups.isNullOrEmpty()) {
+            for (g in rawModGroups) {
+                val map = g as? Map<*, *> ?: continue
+                val groupName = map["name"]?.toString()?.trim()?.ifEmpty { null }
+                    ?: map["groupName"]?.toString()?.trim()?.ifEmpty { null }
+                    ?: continue
+                if (groupName.equals("Pilihan Variasi", ignoreCase = true)) continue
+
+                val rawType = map["selectionType"]?.toString()?.uppercase()
+                    ?: map["type"]?.toString()?.uppercase()
+                    ?: "SINGLE"
+                val selType = if (rawType.contains("MULTI") || rawType.contains("CHECKBOX")) "MULTI" else "SINGLE"
+                val required = (map["required"] as? Boolean) ?: false
+
+                val rawList = (map["options"] as? List<*>)
+                    ?: (map["choices"] as? List<*>)
+                    ?: (map["items"] as? List<*>)
+                    ?: emptyList<Any?>()
+
+                val opts = rawList.mapNotNull { parseOptionItem(it) }
+                result.add(Triple(groupName, selType to required, opts))
+            }
+            if (result.isNotEmpty()) return result
+        }
+
+        val rawOptions = data["options"] as? List<*> ?: data["choices"] as? List<*>
+        if (!rawOptions.isNullOrEmpty()) {
+            for (o in rawOptions) {
+                val map = o as? Map<*, *> ?: continue
+                if (map["source"]?.toString() == "simple") continue
+                val groupName = map["name"]?.toString()?.trim()?.ifEmpty { null }
+                    ?: map["groupName"]?.toString()?.trim()?.ifEmpty { null }
+                    ?: continue
+                if (groupName.equals("Pilihan Variasi", ignoreCase = true)) continue
+
+                val rawType = map["selectionType"]?.toString()?.uppercase()
+                    ?: map["type"]?.toString()?.uppercase()
+                    ?: "SINGLE"
+                val selType = if (rawType.contains("MULTI") || rawType.contains("CHECKBOX")) "MULTI" else "SINGLE"
+                val required = (map["required"] as? Boolean) ?: false
+
+                val rawList = (map["choices"] as? List<*>)
+                    ?: (map["options"] as? List<*>)
+                    ?: (map["items"] as? List<*>)
+                    ?: emptyList<Any?>()
+
+                val opts = rawList.mapNotNull { parseOptionItem(it) }
+                result.add(Triple(groupName, selType to required, opts))
+            }
+        }
+
+        return result
+    }
+
+    private suspend fun syncModifierGroupsToRoom(
+        modifierDao: ModifierDao,
+        productId: Int,
+        parsedGroups: List<Triple<String, Pair<String, Boolean>, List<Pair<String, Double>>>>
+    ) {
+        if (parsedGroups.isEmpty()) {
+            modifierDao.setGroupsForProduct(productId, emptyList())
+            return
+        }
+
+        val existingAll = modifierDao.observeGroups().first()
+        val assignedGroupIds = mutableListOf<Int>()
+
+        for ((groupName, meta, options) in parsedGroups) {
+            val (selType, required) = meta
+            val matched = existingAll.firstOrNull { it.group.name.equals(groupName, ignoreCase = true) }
+
+            val groupId = if (matched == null) {
+                modifierDao.insertGroup(
+                    ModifierGroup(
+                        id = 0,
+                        name = groupName,
+                        selectionType = selType,
+                        required = required
+                    )
+                ).toInt()
+            } else {
+                modifierDao.updateGroup(
+                    matched.group.copy(
+                        name = groupName,
+                        selectionType = selType,
+                        required = required
+                    )
+                )
+                modifierDao.deleteOptions(matched.group.id)
+                matched.group.id
+            }
+
+            if (options.isNotEmpty()) {
+                modifierDao.insertOptions(
+                    options.map { ModifierOption(id = 0, groupId = groupId, name = it.first, price = it.second) }
+                )
+            }
+            assignedGroupIds.add(groupId)
+        }
+
+        modifierDao.setGroupsForProduct(productId, assignedGroupIds)
+    }
+
+    // ==================== SINKRONISASI PENJUALAN & BACKUP ====================
+
+    suspend fun syncSaleToCloud(context: Context, record: SaleRecord) {
+        if (!isFirebaseReady(context)) return
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = hashMapOf<String, Any?>(
+                    "id" to record.id,
+                    "timestamp" to record.timestamp,
+                    "shift" to record.shift,
+                    "serviceType" to record.serviceType,
+                    "paymentMethod" to record.paymentMethod,
+                    "subtotal" to record.subtotal,
+                    "tax" to record.tax,
+                    "total" to record.total,
+                    "orderNumber" to record.orderNumber,
+                    "staffUsername" to record.staffUsername,
+                    "items" to record.items.map { item ->
+                        mapOf(
+                            "name" to item.name,
+                            "category" to item.category,
+                            "quantity" to item.quantity,
+                            "total" to item.total,
+                            "details" to item.details
+                        )
+                    }
+                )
+                firestore().collection("sales")
+                    .document(record.id.toString())
+                    .set(payload, SetOptions.merge())
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal sync sale ${record.id} ke Firestore", e)
+            }
+        }
+    }
+
+    suspend fun syncAllDataToCloud(context: Context): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!isFirebaseReady(context)) {
+                    return@withContext Result.failure(Exception("Firebase belum dikonfigurasi."))
+                }
+                syncAllProductsToCloud(context)
+                val sales = SaleHistoryStore.all(context)
+                sales.forEach { record ->
+                    syncSaleToCloud(context, record)
+                }
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun fetchDataFromCloud(context: Context): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!isFirebaseReady(context)) {
+                    return@withContext Result.failure(Exception("Firebase belum dikonfigurasi."))
+                }
+                val productSnaps = firestore().collection("products").get().await()
+                applyRemoteProductsToRoom(context, productSnaps.documents)
+
+                val salesSnaps = firestore().collection("sales").get().await()
+                val remoteSales = buildList {
+                    for (doc in salesSnaps.documents) {
+                        val id = doc.getLong("id") ?: doc.id.toLongOrNull() ?: continue
+                        val timestamp = doc.getLong("timestamp") ?: 0L
+                        val shift = doc.getLong("shift")?.toInt() ?: 1
+                        val serviceType = doc.getString("serviceType") ?: ""
+                        val paymentMethod = doc.getString("paymentMethod") ?: ""
+                        val subtotal = doc.getDouble("subtotal") ?: 0.0
+                        val tax = doc.getDouble("tax") ?: 0.0
+                        val total = doc.getDouble("total") ?: 0.0
+                        val orderNumber = doc.getLong("orderNumber")?.toInt() ?: 0
+                        val staffUsername = doc.getString("staffUsername") ?: ""
+                        val rawItems = doc.get("items") as? List<*> ?: emptyList<Any>()
+                        val items = rawItems.mapNotNull { itemObj ->
+                            val map = itemObj as? Map<*, *> ?: return@mapNotNull null
+                            val name = map["name"]?.toString() ?: ""
+                            val category = map["category"]?.toString() ?: ""
+                            val quantity = (map["quantity"] as? Number)?.toInt() ?: 1
+                            val totalLine = (map["total"] as? Number)?.toDouble() ?: 0.0
+                            val details = (map["details"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                            SaleLineRecord(name, category, quantity, totalLine, details)
+                        }
+                        add(
+                            SaleRecord(
+                                id = id,
+                                timestamp = timestamp,
+                                shift = shift,
+                                serviceType = serviceType,
+                                paymentMethod = paymentMethod,
+                                subtotal = subtotal,
+                                tax = tax,
+                                total = total,
+                                items = items,
+                                orderNumber = orderNumber,
+                                staffUsername = staffUsername
+                            )
+                        )
+                    }
+                }
+                if (remoteSales.isNotEmpty()) {
+                    val existingSales = SaleHistoryStore.all(context)
+                    val mergedSales = (existingSales + remoteSales).distinctBy { it.id }.sortedBy { it.timestamp }
+                    SaleHistoryStore.saveAll(context, mergedSales)
+                }
+
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+}

@@ -120,19 +120,35 @@ export async function syncCategoriesToFirestore(categories: any[]) {
   const path = 'categories';
   try {
     if (!Array.isArray(categories)) return;
+    const activeIds = new Set<string>();
     for (let i = 0; i < categories.length; i++) {
       const cat = categories[i];
       if (!cat || typeof cat !== 'object') continue;
       const docId = sanitizeDocId(cat.id, 'cat', i);
+      activeIds.add(docId);
       await setDoc(doc(db, 'categories', docId), cleanPayload({ ...cat, id: docId, sortIndex: i }), { merge: true });
     }
-    const catNames = categories.map((c: any) => (c && c.name ? String(c.name).trim() : '')).filter(Boolean);
-    if (catNames.length > 0) {
-      await setDoc(doc(db, 'settings', 'categories'), cleanPayload({ list: catNames, updatedAt: Date.now() }), { merge: true });
+    const existingSnaps = await getDocs(collection(db, 'categories'));
+    for (const d of existingSnaps.docs) {
+      if (!activeIds.has(d.id)) {
+        await deleteDoc(doc(db, 'categories', d.id));
+      }
     }
+    const catNames = categories.map((c: any) => (c && c.name ? String(c.name).trim() : '')).filter(Boolean);
+    await setDoc(doc(db, 'settings', 'categories'), cleanPayload({ list: catNames, updatedAt: Date.now() }));
     console.log("Categories saved to Firestore");
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteCategoryFromFirestore(catId: string) {
+  const docId = sanitizeDocId(catId, 'cat', 0);
+  const path = `categories/${docId}`;
+  try {
+    await deleteDoc(doc(db, 'categories', docId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
   }
 }
 
@@ -140,11 +156,19 @@ export async function syncProductsToFirestore(products: any[]) {
   const path = 'products';
   try {
     if (!Array.isArray(products)) return;
+    const activeIds = new Set<string>();
     for (let i = 0; i < products.length; i++) {
       const prod = products[i];
       if (!prod || typeof prod !== 'object') continue;
       const docId = sanitizeDocId(prod.id, 'prod', i);
+      activeIds.add(docId);
       await setDoc(doc(db, 'products', docId), cleanPayload({ ...prod, id: docId, sortIndex: i }), { merge: true });
+    }
+    const existingSnaps = await getDocs(collection(db, 'products'));
+    for (const d of existingSnaps.docs) {
+      if (!activeIds.has(d.id)) {
+        await deleteDoc(doc(db, 'products', d.id));
+      }
     }
     console.log("Products saved to Firestore");
   } catch (err) {
@@ -168,15 +192,34 @@ export async function syncSingleProductToFirestore(product: any) {
   }
 }
 
+export async function deleteProductFromFirestore(productId: string) {
+  const docId = sanitizeDocId(productId, 'prod', 0);
+  const path = `products/${docId}`;
+  try {
+    await deleteDoc(doc(db, 'products', docId));
+    console.log(`Product ${docId} deleted from Firestore`);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
 export async function syncExtrasToFirestore(extras: any[]) {
   const path = 'extras';
   try {
     if (!Array.isArray(extras)) return;
+    const activeIds = new Set<string>();
     for (let i = 0; i < extras.length; i++) {
       const ext = extras[i];
       if (!ext || typeof ext !== 'object') continue;
       const docId = sanitizeDocId(ext.id, 'ext', i);
+      activeIds.add(docId);
       await setDoc(doc(db, 'extras', docId), cleanPayload({ ...ext, id: docId, sortIndex: i }));
+    }
+    const existingSnaps = await getDocs(collection(db, 'extras'));
+    for (const d of existingSnaps.docs) {
+      if (!activeIds.has(d.id)) {
+        await deleteDoc(doc(db, 'extras', d.id));
+      }
     }
     console.log("Extras saved to Firestore");
   } catch (err) {
@@ -184,15 +227,33 @@ export async function syncExtrasToFirestore(extras: any[]) {
   }
 }
 
+export async function deleteExtraFromFirestore(extraId: string) {
+  const docId = sanitizeDocId(extraId, 'ext', 0);
+  const path = `extras/${docId}`;
+  try {
+    await deleteDoc(doc(db, 'extras', docId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, path);
+  }
+}
+
 export async function syncPackagesToFirestore(packages: any[]) {
   const path = 'packages';
   try {
     if (!Array.isArray(packages)) return;
+    const activeIds = new Set<string>();
     for (let i = 0; i < packages.length; i++) {
       const pkg = packages[i];
       if (!pkg || typeof pkg !== 'object') continue;
       const docId = sanitizeDocId(pkg.id, 'pkg', i);
+      activeIds.add(docId);
       await setDoc(doc(db, 'packages', docId), cleanPayload({ ...pkg, id: docId, sortIndex: i }));
+    }
+    const existingSnaps = await getDocs(collection(db, 'packages'));
+    for (const d of existingSnaps.docs) {
+      if (!activeIds.has(d.id)) {
+        await deleteDoc(doc(db, 'packages', d.id));
+      }
     }
     console.log("Packages saved to Firestore");
   } catch (err) {
@@ -261,6 +322,13 @@ export function listenToOrderStatus(
 export function initFirestoreDataSync() {
   testConnection();
 
+  const initialSeedFlags = {
+    categories: false,
+    products: false,
+    extras: false,
+    packages: false
+  };
+
   // 1. Listen Store Config
   const configPath = 'settings';
   try {
@@ -288,15 +356,15 @@ export function initFirestoreDataSync() {
   try {
     onSnapshot(collection(db, 'categories'), (snapshot) => {
       if (!snapshot.empty) {
+        initialSeedFlags.categories = true;
         const cats: any[] = [];
         snapshot.forEach(d => cats.push(d.data()));
         if ((window as any).onFirestoreCategoriesUpdate) {
           (window as any).onFirestoreCategoriesUpdate(cats);
         }
-      } else {
-        if ((window as any).CATEGORIES) {
-          syncCategoriesToFirestore((window as any).CATEGORIES);
-        }
+      } else if (!initialSeedFlags.categories && (window as any).CATEGORIES) {
+        initialSeedFlags.categories = true;
+        syncCategoriesToFirestore((window as any).CATEGORIES);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, catPath);
@@ -326,15 +394,17 @@ export function initFirestoreDataSync() {
   try {
     onSnapshot(collection(db, 'products'), (snapshot) => {
       if (!snapshot.empty) {
+        initialSeedFlags.products = true;
         const prods: any[] = [];
         snapshot.forEach(d => prods.push(d.data()));
         if ((window as any).onFirestoreProductsUpdate) {
           (window as any).onFirestoreProductsUpdate(prods);
         }
-      } else {
-        if ((window as any).PRODUCTS) {
-          syncProductsToFirestore((window as any).PRODUCTS);
-        }
+      } else if (!initialSeedFlags.products && (window as any).PRODUCTS) {
+        initialSeedFlags.products = true;
+        syncProductsToFirestore((window as any).PRODUCTS);
+      } else if (initialSeedFlags.products && (window as any).onFirestoreProductsUpdate) {
+        (window as any).onFirestoreProductsUpdate([]);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, prodPath);
@@ -348,15 +418,17 @@ export function initFirestoreDataSync() {
   try {
     onSnapshot(collection(db, 'extras'), (snapshot) => {
       if (!snapshot.empty) {
+        initialSeedFlags.extras = true;
         const extList: any[] = [];
         snapshot.forEach(d => extList.push(d.data()));
         if ((window as any).onFirestoreExtrasUpdate) {
           (window as any).onFirestoreExtrasUpdate(extList);
         }
-      } else {
-        if ((window as any).EXTRAS) {
-          syncExtrasToFirestore((window as any).EXTRAS);
-        }
+      } else if (!initialSeedFlags.extras && (window as any).EXTRAS) {
+        initialSeedFlags.extras = true;
+        syncExtrasToFirestore((window as any).EXTRAS);
+      } else if (initialSeedFlags.extras && (window as any).onFirestoreExtrasUpdate) {
+        (window as any).onFirestoreExtrasUpdate([]);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, extraPath);
@@ -370,15 +442,17 @@ export function initFirestoreDataSync() {
   try {
     onSnapshot(collection(db, 'packages'), (snapshot) => {
       if (!snapshot.empty) {
+        initialSeedFlags.packages = true;
         const pkgList: any[] = [];
         snapshot.forEach(d => pkgList.push(d.data()));
         if ((window as any).onFirestorePackagesUpdate) {
           (window as any).onFirestorePackagesUpdate(pkgList);
         }
-      } else {
-        if ((window as any).PACKAGE_MENUS) {
-          syncPackagesToFirestore((window as any).PACKAGE_MENUS);
-        }
+      } else if (!initialSeedFlags.packages && (window as any).PACKAGE_MENUS) {
+        initialSeedFlags.packages = true;
+        syncPackagesToFirestore((window as any).PACKAGE_MENUS);
+      } else if (initialSeedFlags.packages && (window as any).onFirestorePackagesUpdate) {
+        (window as any).onFirestorePackagesUpdate([]);
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, packagePath);
@@ -396,9 +470,12 @@ export function initFirestoreDataSync() {
   databaseId: (firebaseConfig as any).firestoreDatabaseId || '(default)',
   syncConfigToFirestore,
   syncCategoriesToFirestore,
+  deleteCategoryFromFirestore,
   syncProductsToFirestore,
   syncSingleProductToFirestore,
+  deleteProductFromFirestore,
   syncExtrasToFirestore,
+  deleteExtraFromFirestore,
   syncPackagesToFirestore,
   deletePackageFromFirestore,
   submitOrderToFirestore,
