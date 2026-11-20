@@ -1,185 +1,418 @@
 {
   "entities": {
-    "StoreConfig": {
-      "title": "StoreConfig",
-      "description": "Pengaturan informasi profil restoran dan kontak WhatsApp",
+    "Account": {
+      "title": "Account",
+      "description": "Akun induk pemilik bisnis yang terdaftar di POS Kasir (1 email induk dapat memiliki banyak cabang dan banyak username).",
       "type": "object",
       "properties": {
-        "restaurantName": {
+        "accountId": {
           "type": "string",
-          "description": "Nama resmi restoran",
-          "maxLength": 100
+          "description": "ID unik akun (hasil normalisasi email)",
+          "maxLength": 128
         },
-        "tagline": {
+        "email": {
           "type": "string",
-          "description": "Tagline atau slogan restoran",
+          "description": "Email resmi pemilik yang terdaftar di POS",
           "maxLength": 150
         },
-        "description": {
+        "businessName": {
           "type": "string",
-          "description": "Deskripsi singkat profil restoran",
-          "maxLength": 500
+          "description": "Nama bisnis atau brand induk",
+          "maxLength": 120
         },
-        "whatsappNumber": {
-          "type": "string",
-          "description": "Nomor WhatsApp penjual untuk checkout",
-          "maxLength": 20
+        "isActive": {
+          "type": "boolean",
+          "description": "Status aktif akun bisnis"
         },
-        "address": {
+        "centralBranchId": {
           "type": "string",
-          "description": "Alamat fisik restoran",
-          "maxLength": 300
+          "description": "ID cabang pusat sebagai sumber salin pengaturan",
+          "maxLength": 128
         },
-        "mapsUrl": {
-          "type": "string",
-          "description": "Tautan Google Maps lokasi restoran",
-          "maxLength": 500
-        },
-        "hours": {
-          "type": "string",
-          "description": "Jam operasional dapur restoran",
-          "maxLength": 150
-        },
-        "currencyLocale": {
-          "type": "string",
-          "description": "Locale mata uang (contoh: id-ID)",
-          "maxLength": 10
-        },
-        "currencyCode": {
-          "type": "string",
-          "description": "Kode mata uang (contoh: IDR)",
-          "maxLength": 10
+        "createdAt": {
+          "type": "string"
         },
         "updatedAt": {
-          "type": "string",
-          "description": "Waktu pembaruan profil toko"
+          "type": "string"
         }
       },
-      "required": ["restaurantName", "whatsappNumber"]
+      "required": ["accountId", "email", "isActive"]
     },
-    "Category": {
-      "title": "Category",
-      "description": "Kategori hidangan restoran Jepang",
+    "AccountUser": {
+      "title": "AccountUser",
+      "description": "Username & PIN staf/pengelola di bawah email POS. Login Website hanya mengizinkan roleLevel >= 3 (Manager ke atas).",
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "description": "Username unik login cabang",
+          "maxLength": 64
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Nama lengkap pengguna",
+          "maxLength": 100
+        },
+        "pin": {
+          "type": "string",
+          "description": "PIN login (disinkronkan dengan POS)",
+          "maxLength": 32
+        },
+        "pinHash": {
+          "type": "string",
+          "description": "Hash SHA-256 opsional dari PIN",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "description": "Peran jabatan (owner, admin, manager, kasir, staff)",
+          "maxLength": 32
+        },
+        "roleLevel": {
+          "type": "number",
+          "description": "Level numerik peran (5=owner, 4=admin, 3=manager, 1=kasir/staff)"
+        },
+        "branchIds": {
+          "type": "array",
+          "description": "Daftar ID cabang yang boleh dikelola username ini"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": ["username", "role", "isActive"]
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Profil operasional dan koordinat lokasi masing-masing cabang toko",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "ID unik kategori",
-          "maxLength": 50
+          "maxLength": 128
         },
         "name": {
           "type": "string",
-          "description": "Nama kategori menu",
+          "description": "Nama cabang (contoh: Cabang Bandung Utara)",
+          "maxLength": 120
+        },
+        "slug": {
+          "type": "string",
+          "description": "Kode URL cabang untuk link otomatis ?cabang=slug",
+          "maxLength": 80
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "isCentral": {
+          "type": "boolean",
+          "description": "Menandai apakah cabang ini adalah cabang pusat"
+        },
+        "ownerEmail": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "whatsappNumber": {
+          "type": "string",
+          "maxLength": 25
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 350
+        },
+        "mapsUrl": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "originLat": {
+          "type": "number"
+        },
+        "originLng": {
+          "type": "number"
+        },
+        "hours": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "currencyLocale": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "currencyCode": {
+          "type": "string",
+          "maxLength": 10
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "slug", "isActive"]
+    },
+    "BranchAppearance": {
+      "title": "BranchAppearance",
+      "description": "Tema warna, tipografi, logo, dan seluruh kamus teks tampilan konsumen milik cabang",
+      "type": "object",
+      "properties": {
+        "storeName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "tagline": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "logoDataUrl": {
+          "type": "string",
+          "maxLength": 500000
+        },
+        "showRatingsAndReviews": {
+          "type": "boolean"
+        },
+        "theme": {
+          "type": "object",
+          "description": "Token warna, gradien hero, mode gelap/terang, font display/body, radius"
+        },
+        "copy": {
+          "type": "object",
+          "description": "Seluruh teks yang tampil ke konsumen (hero, nav, katalog, highlight, keunggulan, cara pesan, footer)"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      }
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Kategori produk atau menu per cabang",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
           "maxLength": 100
         },
-        "order": {
-          "type": "number",
-          "description": "Urutan tampilan kategori"
+        "sortIndex": {
+          "type": "number"
         }
       },
       "required": ["id", "name"]
     },
     "Product": {
       "title": "Product",
-      "description": "Item menu hidangan makanan atau minuman",
+      "description": "Item katalog menu atau produk per cabang dengan sinkronisasi variasi dua arah POS",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "ID unik menu",
-          "maxLength": 100
+          "maxLength": 128
         },
         "name": {
           "type": "string",
-          "description": "Nama menu masakan atau minuman",
           "maxLength": 150
         },
         "category": {
           "type": "string",
-          "description": "Kategori menu",
-          "maxLength": 50
+          "maxLength": 100
         },
         "price": {
-          "type": "number",
-          "description": "Harga satuan dalam Rupiah"
+          "type": "number"
+        },
+        "stock": {
+          "type": "number"
         },
         "rating": {
-          "type": "number",
-          "description": "Rating ulasan menu (0.0 - 5.0)"
+          "type": "number"
         },
         "reviewsCount": {
-          "type": "number",
-          "description": "Jumlah ulasan konsumen"
+          "type": "number"
         },
         "badge": {
           "type": "string",
-          "description": "Badge spesial (contoh: Signature Roll, Chef Special)",
-          "maxLength": 50
+          "maxLength": 60
         },
         "featuredInHero": {
-          "type": "boolean",
-          "description": "Apakah tampil di banner slideshow beranda"
+          "type": "boolean"
         },
         "description": {
           "type": "string",
-          "description": "Deskripsi lengkap rasa dan bahan hidangan",
-          "maxLength": 1000
+          "maxLength": 1500
         },
         "image": {
           "type": "string",
-          "description": "URL foto menu",
-          "maxLength": 2000
+          "maxLength": 700000
         },
-        "order": {
-          "type": "number",
-          "description": "Urutan tampilan menu dalam katalog"
+        "options": {
+          "type": "array"
+        },
+        "modifierGroups": {
+          "type": "array"
+        },
+        "sortIndex": {
+          "type": "number"
         }
       },
-      "required": ["id", "name", "category", "price", "description"]
+      "required": ["id", "name", "price"]
     },
     "Extra": {
       "title": "Extra",
-      "description": "Pilihan pelengkap atau ekstra berbayar di keranjang",
+      "description": "Pilihan tambahan / pelengkap di keranjang per cabang",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
-          "description": "ID unik ekstra",
-          "maxLength": 50
+          "maxLength": 128
         },
         "name": {
           "type": "string",
-          "description": "Nama item ekstra (contoh: Wasabi Segar, Sumpit)",
-          "maxLength": 100
+          "maxLength": 120
         },
         "price": {
-          "type": "number",
-          "description": "Harga satuan pelengkap"
+          "type": "number"
         },
         "enabled": {
-          "type": "boolean",
-          "description": "Status aktif untuk dipilih konsumen"
+          "type": "boolean"
+        },
+        "sortIndex": {
+          "type": "number"
         }
       },
       "required": ["id", "name", "price", "enabled"]
+    },
+    "PackageMenu": {
+      "title": "PackageMenu",
+      "description": "Katalog paket promo atau bundel per cabang",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "badge": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "price": {
+          "type": "number"
+        },
+        "originalPrice": {
+          "type": "number"
+        },
+        "portion": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1500
+        },
+        "items": {
+          "type": "array"
+        },
+        "options": {
+          "type": "array"
+        },
+        "image": {
+          "type": "string",
+          "maxLength": 700000
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "name", "price"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Pesanan konsumen real-time per cabang (Website <-> POS Kasir)",
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "branchId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "status": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "orderType": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "customerName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "items": {
+          "type": "array"
+        },
+        "totalAmount": {
+          "type": "number"
+        },
+        "timestamp": {
+          "type": "number"
+        }
+      },
+      "required": ["orderId", "status", "items", "totalAmount"]
     }
   },
   "firestore": {
-    "/settings/{settingId}": {
-      "schema": "StoreConfig",
-      "description": "Menyimpan pengaturan profil restoran dan WhatsApp"
+    "/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Daftar email pemilik usaha yang terdaftar di POS Kasir"
     },
-    "/categories/{categoryId}": {
+    "/accounts/{accountId}/users/{username}": {
+      "schema": "AccountUser",
+      "description": "Daftar username, PIN, role, dan cabang izin di bawah email POS"
+    },
+    "/branches/{branchId}": {
+      "schema": "Branch",
+      "description": "Daftar cabang toko (nama, slug, alamat, WhatsApp, koordinat origin Maps)"
+    },
+    "/branches/{branchId}/settings/{settingId}": {
+      "schema": "BranchAppearance",
+      "description": "Pengaturan tema visual, teks konsumen, dan profil cabang"
+    },
+    "/branches/{branchId}/categories/{categoryId}": {
       "schema": "Category",
-      "description": "Koleksi data kategori menu restoran"
+      "description": "Kategori katalog milik cabang"
     },
-    "/products/{productId}": {
+    "/branches/{branchId}/products/{productId}": {
       "schema": "Product",
-      "description": "Koleksi data produk menu hidangan"
+      "description": "Produk & variasi milik cabang"
     },
-    "/extras/{extraId}": {
+    "/branches/{branchId}/extras/{extraId}": {
       "schema": "Extra",
-      "description": "Koleksi pelengkap dan ekstra pesanan"
+      "description": "Item tambahan/pelengkap checkout milik cabang"
+    },
+    "/branches/{branchId}/packages/{packageId}": {
+      "schema": "PackageMenu",
+      "description": "Paket promo/bundel milik cabang"
+    },
+    "/branches/{branchId}/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Pesanan konsumen real-time khusus untuk cabang terkait"
     }
   }
 }

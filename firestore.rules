@@ -11,64 +11,151 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'tonwisz@gmail.com' ||
-        request.auth.token.email == 'admin@utori.com'
-      );
-    }
-
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    // Profil Toko & Pengaturan Restoran
+    function isValidShortString(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // =========================================================================
+    // 1. MULTI-CABANG & AKUN POS KASIR (Email + Username + PIN, Gate Manager+)
+    // =========================================================================
+    match /accounts/{accountId} {
+      allow get: if isValidId(accountId);
+      allow list: if true;
+      allow create, update: if isValidId(accountId)
+        && isValidShortString(incoming().email, 150)
+        && incoming().isActive is bool;
+      allow delete: if isValidId(accountId);
+
+      match /users/{username} {
+        allow get: if isValidId(accountId) && isValidId(username);
+        allow list: if isValidId(accountId);
+        allow create, update: if isValidId(accountId) && isValidId(username)
+          && isValidShortString(incoming().username, 64)
+          && isValidShortString(incoming().role, 32)
+          && incoming().isActive is bool;
+        allow delete: if isValidId(accountId) && isValidId(username);
+      }
+    }
+
+    match /branches/{branchId} {
+      allow get: if isValidId(branchId);
+      allow list: if true;
+      allow create, update: if isValidId(branchId)
+        && isValidShortString(incoming().name, 120)
+        && isValidShortString(incoming().slug, 80)
+        && incoming().isActive is bool;
+      allow delete: if isValidId(branchId);
+
+      match /settings/{settingId} {
+        allow get: if isValidId(branchId) && isValidId(settingId);
+        allow list: if isValidId(branchId);
+        allow create, update: if isValidId(branchId) && isValidId(settingId);
+        allow delete: if isValidId(branchId) && isValidId(settingId);
+      }
+
+      match /categories/{categoryId} {
+        allow get: if isValidId(branchId) && isValidId(categoryId);
+        allow list: if isValidId(branchId);
+        allow create, update: if isValidId(branchId) && isValidId(categoryId)
+          && isValidShortString(incoming().name, 100);
+        allow delete: if isValidId(branchId) && isValidId(categoryId);
+      }
+
+      match /products/{productId} {
+        allow get: if isValidId(branchId) && isValidId(productId);
+        allow list: if isValidId(branchId);
+        allow create, update: if isValidId(branchId) && isValidId(productId)
+          && isValidShortString(incoming().name, 150)
+          && incoming().price is number
+          && incoming().price >= 0;
+        allow delete: if isValidId(branchId) && isValidId(productId);
+      }
+
+      match /extras/{extraId} {
+        allow get: if isValidId(branchId) && isValidId(extraId);
+        allow list: if isValidId(branchId);
+        allow create, update: if isValidId(branchId) && isValidId(extraId)
+          && isValidShortString(incoming().name, 120)
+          && incoming().price is number
+          && incoming().price >= 0;
+        allow delete: if isValidId(branchId) && isValidId(extraId);
+      }
+
+      match /packages/{packageId} {
+        allow get: if isValidId(branchId) && isValidId(packageId);
+        allow list: if isValidId(branchId);
+        allow create, update: if isValidId(branchId) && isValidId(packageId)
+          && isValidShortString(incoming().name, 150)
+          && incoming().price is number
+          && incoming().price >= 0;
+        allow delete: if isValidId(branchId) && isValidId(packageId);
+      }
+
+      match /orders/{orderId} {
+        allow get: if isValidId(branchId) && isValidId(orderId);
+        allow list: if isValidId(branchId);
+        allow create: if isValidId(branchId) && isValidId(orderId)
+          && isValidShortString(incoming().status, 40)
+          && incoming().totalAmount is number
+          && incoming().totalAmount >= 0
+          && incoming().items is list;
+        allow update: if isValidId(branchId) && isValidId(orderId)
+          && isValidShortString(incoming().status, 40);
+        allow delete: if isValidId(branchId) && isValidId(orderId);
+      }
+    }
+
+    // =========================================================================
+    // 2. COMPATIBILITAS KOLEKSI ROOT (UNTUK SINKRONISASI POS ANDROID LEGACY)
+    // =========================================================================
     match /settings/{settingId} {
       allow get: if isValidId(settingId);
       allow list: if true;
-      allow write: if isValidId(settingId) && (isAdmin() || true);
+      allow write: if isValidId(settingId);
     }
 
-    // Kategori Menu
     match /categories/{categoryId} {
       allow get: if isValidId(categoryId);
       allow list: if true;
-      allow write: if isValidId(categoryId) && (isAdmin() || true);
+      allow write: if isValidId(categoryId);
     }
 
-    // Katalog Menu Hidangan (Sushi, Donburi, Minuman, dll)
     match /products/{productId} {
       allow get: if isValidId(productId);
       allow list: if true;
-      allow write: if isValidId(productId) && (isAdmin() || true);
+      allow write: if isValidId(productId);
     }
 
-    // Pilihan Ekstra & Pelengkap
     match /extras/{extraId} {
       allow get: if isValidId(extraId);
       allow list: if true;
-      allow write: if isValidId(extraId) && (isAdmin() || true);
+      allow write: if isValidId(extraId);
     }
 
-    // Katalog Menu Paket Hemat & Platter
     match /packages/{packageId} {
       allow get: if isValidId(packageId);
       allow list: if true;
-      allow write: if isValidId(packageId) && (isAdmin() || true);
+      allow write: if isValidId(packageId);
     }
 
-    // Pesanan Konsumen Real-time (Website <-> POS Kasir Android UTORI POS)
     match /orders/{orderId} {
       allow get: if isValidId(orderId);
       allow list: if true;
       allow create: if isValidId(orderId)
-        && request.resource.data.status is string
-        && request.resource.data.totalAmount is number
-        && request.resource.data.items is list;
+        && isValidShortString(incoming().status, 40)
+        && incoming().totalAmount is number
+        && incoming().items is list;
       allow update: if isValidId(orderId)
-        && request.resource.data.status is string;
+        && isValidShortString(incoming().status, 40);
       allow delete: if isValidId(orderId);
     }
   }
 }
-

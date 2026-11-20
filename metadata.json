@@ -1,6 +1,6 @@
 {
-  "name": "Utori Sushi & Donburi - Japanese Restaurant",
-  "description": "Toko online restoran Jepang modern & responsif: Sushi roll premium, Donburi gurih, Ocha segar, keranjang belanja interaktif, dan checkout WhatsApp dengan mudah.",
+  "name": "Storefront Multi-Cabang - Katalog Produk & Pesan Online",
+  "description": "Platform katalog produk dan pemesanan online multi-cabang yang dapat dikustomisasi penuh dan terintegrasi langsung dengan POS Kasir.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

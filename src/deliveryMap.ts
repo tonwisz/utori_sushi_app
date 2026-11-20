@@ -44,8 +44,8 @@ function buildGoogleMapsPinUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${lat.toFixed(6)},${lng.toFixed(6)}`;
 }
 
-// Default anchor: Utori Sushi & Donburi (Jl. Sarimanah, Sarijadi, Bandung)
-const DEFAULT_CENTER = { lat: -6.8768, lng: 107.5754 };
+// Default origin anchor (updated dynamically per active branch)
+let defaultCenter = { lat: -6.200000, lng: 106.816666 };
 
 let loaderConfigured = false;
 let mapInstance: google.maps.Map | null = null;
@@ -53,11 +53,22 @@ let markerInstance: google.maps.marker.AdvancedMarkerElement | null = null;
 let geocoderInstance: google.maps.Geocoder | null = null;
 let activeCallbacks: DeliveryMapCallbacks | null = null;
 let lastResolvedPin: DeliveryPinData = {
-  lat: DEFAULT_CENTER.lat,
-  lng: DEFAULT_CENTER.lng,
-  mapsUrl: buildGoogleMapsPinUrl(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+  lat: defaultCenter.lat,
+  lng: defaultCenter.lng,
+  mapsUrl: buildGoogleMapsPinUrl(defaultCenter.lat, defaultCenter.lng),
   formattedAddress: '',
 };
+
+function setDefaultOrigin(lat: number, lng: number): void {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  defaultCenter = { lat: Number(lat.toFixed(6)), lng: Number(lng.toFixed(6)) };
+  lastResolvedPin = {
+    lat: defaultCenter.lat,
+    lng: defaultCenter.lng,
+    mapsUrl: buildGoogleMapsPinUrl(defaultCenter.lat, defaultCenter.lng),
+    formattedAddress: '',
+  };
+}
 
 function ensureApiOptions(): string {
   const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
@@ -154,7 +165,7 @@ async function initPicker(
   const startPos =
     initialPin && Number.isFinite(initialPin.lat) && Number.isFinite(initialPin.lng)
       ? { lat: initialPin.lat, lng: initialPin.lng }
-      : DEFAULT_CENTER;
+      : defaultCenter;
 
   const [{ Map }, { AdvancedMarkerElement }, { PlaceAutocompleteElement }] = await Promise.all([
     importLibrary('maps'),
@@ -331,6 +342,7 @@ const UtoriDeliveryMap = {
   requestCurrentPosition,
   getCurrentPin,
   buildGoogleMapsPinUrl,
+  setDefaultOrigin,
 };
 
 (window as any).UtoriDeliveryMap = UtoriDeliveryMap;
