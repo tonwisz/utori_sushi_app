@@ -607,9 +607,18 @@
         try {
           if (!cfg || typeof cfg !== "object") return;
           const bId = resolveBranchId(branchId);
+          const safeName = String(cfg.name || cfg.restaurantName || bId || "Cabang").trim().slice(0, 120) || "Cabang";
+          const safeSlug = String(cfg.slug || bId).trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || bId;
           await setDoc(
             doc(db, "branches", bId),
-            cleanFirestorePayload({ ...cfg, id: bId, updatedAt: new Date().toISOString() }),
+            cleanFirestorePayload({
+              ...cfg,
+              id: bId,
+              name: safeName,
+              slug: safeSlug,
+              isActive: cfg.isActive !== false,
+              updatedAt: new Date().toISOString()
+            }),
             { merge: true }
           );
         } catch (e) { console.error("Error syncConfigToFirestore:", e); }
