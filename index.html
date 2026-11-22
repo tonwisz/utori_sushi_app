@@ -1218,20 +1218,22 @@
               onmouseleave="resumeHeroSlideshow()"
             >
               
-              <!-- Card Slide Viewport -->
+              <!-- Card Slide Viewport (Full-bleed tanpa outline/padding) -->
               <div 
                 id="heroSlideCard" 
-                class="relative radius-theme-card overflow-hidden shadow-2xl border-2 border-white/15 bg-black/35 min-h-[380px] sm:min-h-[440px] flex items-center justify-center transition-all duration-500 p-6 text-center"
+                class="relative radius-theme-card overflow-hidden shadow-2xl border-0 outline-none bg-transparent h-[380px] sm:h-[460px] transition-all duration-500"
               >
                 <!-- Populated dynamically by renderHeroSlideshow() -->
-                <div class="space-y-3 max-w-xs text-stone-200">
-                  <div class="w-14 h-14 mx-auto rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center text-amber-300">
-                    <i data-lucide="sparkles" class="w-7 h-7"></i>
+                <div class="w-full h-full flex items-center justify-center p-6 text-center bg-black/35">
+                  <div class="space-y-3 max-w-xs text-stone-200">
+                    <div class="w-14 h-14 mx-auto rounded-2xl bg-white/10 flex items-center justify-center text-amber-300">
+                      <i data-lucide="sparkles" class="w-7 h-7"></i>
+                    </div>
+                    <h3 class="font-display font-bold text-lg text-white">Etalase Produk Cabang</h3>
+                    <p class="text-xs text-stone-300 leading-relaxed">
+                      Belum ada produk unggulan pada cabang ini. Login sebagai Manager ke atas untuk menambahkan produk dan memilih item banner.
+                    </p>
                   </div>
-                  <h3 class="font-display font-bold text-lg text-white">Etalase Produk Cabang</h3>
-                  <p class="text-xs text-stone-300 leading-relaxed">
-                    Belum ada produk unggulan pada cabang ini. Login sebagai Manager ke atas untuk menambahkan produk dan memilih item banner.
-                  </p>
                 </div>
               </div>
 
@@ -1239,7 +1241,7 @@
               <button 
                 type="button" 
                 onclick="prevHeroSlide(event)" 
-                class="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-stone-900/80 hover:bg-theme-accent text-white flex items-center justify-center backdrop-blur-md border border-white/20 transition-all opacity-80 group-hover:opacity-100 hover:scale-110 cursor-pointer shadow-lg active:scale-95"
+                class="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-stone-900/75 hover:bg-theme-accent text-white flex items-center justify-center backdrop-blur-md border border-white/15 transition-all opacity-80 group-hover:opacity-100 hover:scale-110 cursor-pointer shadow-lg active:scale-95"
                 title="Produk Sebelumnya"
                 aria-label="Produk Sebelumnya"
               >
@@ -1250,7 +1252,7 @@
               <button 
                 type="button" 
                 onclick="nextHeroSlide(event)" 
-                class="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-stone-900/80 hover:bg-theme-accent text-white flex items-center justify-center backdrop-blur-md border border-white/20 transition-all opacity-80 group-hover:opacity-100 hover:scale-110 cursor-pointer shadow-lg active:scale-95"
+                class="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-stone-900/75 hover:bg-theme-accent text-white flex items-center justify-center backdrop-blur-md border border-white/15 transition-all opacity-80 group-hover:opacity-100 hover:scale-110 cursor-pointer shadow-lg active:scale-95"
                 title="Produk Selanjutnya"
                 aria-label="Produk Selanjutnya"
               >
@@ -1259,7 +1261,7 @@
 
               <!-- Dots Indikator Slide -->
               <div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5">
-                <div id="heroSlideDots" class="flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10 shadow-md">
+                <div id="heroSlideDots" class="hidden flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full shadow-md">
                   <!-- Populated by JavaScript -->
                 </div>
               </div>
@@ -8142,12 +8144,12 @@ ${closing}`;
       const file = input?.files?.[0];
       if (!file) return;
       try {
-        const compressed = await compressImageFile(file, 360, 360, 0.85);
+        const compressed = await compressImageFile(file, 360, 360, 0.9, true);
         THEME_CONFIG.logoDataUrl = compressed;
         const prev = document.getElementById("themeBrandLogoPreview");
         if (prev) prev.src = compressed;
         applyThemeTokens();
-        showToast("Logo brand diperbarui! Klik 'Terapkan & Simpan Tema' untuk menyimpan ke Cloud.", 2500);
+        showToast("Logo brand diperbarui (transparansi dipertahankan)! Klik 'Terapkan & Simpan Tema' untuk menyimpan ke Cloud.", 2800);
       } catch (err) {
         showToast(err?.message || "Gagal memproses logo.", 3000);
       }
@@ -10486,17 +10488,17 @@ ${closing}`;
           <img
             src="${THEME_CONFIG.highlightImageUrl || DEFAULT_HIGHLIGHT_IMG}"
             alt="${CONFIG.restaurantName || 'Etalase Cabang'}"
-            class="w-full h-[380px] sm:h-[460px] object-cover"
+            class="block w-full h-full object-cover"
             onerror="this.onerror=null; this.src='${DEFAULT_HIGHLIGHT_IMG}';"
           />
-          <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/20 pointer-events-none"></div>
+          <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-black/15 pointer-events-none"></div>
           <div class="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none z-10">
             <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-jp-crimson/95 rounded-md text-[10px] font-bold text-white uppercase tracking-wider">
               <span class="w-1.5 h-1.5 rounded-full bg-amber-300"></span>
               <span>Etalase Cabang</span>
             </div>
           </div>
-          <div class="absolute bottom-6 left-4 right-4 text-white z-10 pointer-events-none">
+          <div class="absolute bottom-6 left-4 right-4 text-left text-white z-10 pointer-events-none">
             <h3 class="font-display font-bold text-lg sm:text-2xl text-white tracking-tight leading-snug">
               ${CONFIG.restaurantName || "Toko Anda"}
             </h3>
@@ -10505,7 +10507,10 @@ ${closing}`;
             </p>
           </div>
         `;
-        if (dotsContainer) dotsContainer.innerHTML = "";
+        if (dotsContainer) {
+          dotsContainer.innerHTML = "";
+          dotsContainer.classList.add("hidden");
+        }
         return;
       }
 
@@ -10520,11 +10525,11 @@ ${closing}`;
         <img 
           src="${imgUrl}" 
           alt="${item.name}" 
-          class="w-full h-[380px] sm:h-[460px] object-cover transition-transform duration-700 ease-out"
+          class="block w-full h-full object-cover transition-transform duration-700 ease-out"
           loading="eager"
           onerror="this.onerror=null; this.src='${DEFAULT_NEUTRAL_PLACEHOLDER_IMG}';"
         />
-        <div class="absolute inset-0 bg-gradient-to-t from-black/95 via-black/40 to-black/25 pointer-events-none"></div>
+        <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-black/20 pointer-events-none"></div>
 
         <div class="absolute top-4 left-4 right-4 flex items-start justify-between pointer-events-none z-10">
           <div class="flex flex-col items-start gap-1.5">
@@ -10532,18 +10537,18 @@ ${closing}`;
               <span class="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse"></span>
               <span>${catName}</span>
             </div>
-            <div class="inline-flex items-center px-3 py-1 bg-stone-900/90 backdrop-blur-md rounded-xl border border-white/15 shadow-lg">
+            <div class="inline-flex items-center px-3 py-1 bg-stone-900/85 backdrop-blur-md rounded-xl shadow-lg">
               <span class="font-mono font-black text-amber-400 text-sm sm:text-base tabular-nums">
                 ${currencyFormatter.format(item.price)}
               </span>
             </div>
           </div>
-          <div class="px-2.5 py-1 bg-stone-900/80 backdrop-blur-md rounded-md text-[10px] font-mono font-bold text-stone-200">
+          <div class="px-2.5 py-1 bg-stone-900/75 backdrop-blur-md rounded-md text-[10px] font-mono font-bold text-stone-200">
             ${heroSlideshowIndex + 1} / ${slides.length}
           </div>
         </div>
 
-        <div class="absolute bottom-6 left-4 right-4 text-white z-10 pointer-events-none">
+        <div class="absolute bottom-10 left-4 right-4 text-left text-white z-10 pointer-events-none">
           <div class="flex items-center gap-2 mb-1.5">
             <span class="px-2 py-0.5 bg-amber-500 text-stone-950 font-black text-[9px] rounded uppercase">
               ${item.badge || "Unggulan"}
@@ -10558,7 +10563,7 @@ ${closing}`;
             <h3 class="font-display font-bold text-lg sm:text-2xl text-white tracking-tight leading-snug">
               ${item.name}
             </h3>
-            <p class="text-[11px] sm:text-xs text-stone-200 mt-1 leading-relaxed">
+            <p class="text-[11px] sm:text-xs text-stone-200 mt-1 leading-relaxed line-clamp-2">
               ${item.description || `Produk unggulan dari ${CONFIG.restaurantName || "cabang ini"}.`}
             </p>
           </div>
@@ -10569,13 +10574,19 @@ ${closing}`;
       card.classList.add("cursor-pointer");
 
       if (dotsContainer) {
-        dotsContainer.innerHTML = slides.map((s, idx) => `
-          <button 
-            type="button" 
-            onclick="goToHeroSlide(${idx})" 
-            class="transition-all duration-300 cursor-pointer ${idx === heroSlideshowIndex ? 'w-5 h-2 bg-jp-crimson rounded-full shadow-xs' : 'w-2 h-2 bg-white/40 hover:bg-white/80 rounded-full'}"
-          ></button>
-        `).join("");
+        if (slides.length > 1) {
+          dotsContainer.classList.remove("hidden");
+          dotsContainer.innerHTML = slides.map((s, idx) => `
+            <button 
+              type="button" 
+              onclick="goToHeroSlide(${idx})" 
+              class="transition-all duration-300 cursor-pointer ${idx === heroSlideshowIndex ? 'w-5 h-2 bg-jp-crimson rounded-full shadow-xs' : 'w-2 h-2 bg-white/40 hover:bg-white/80 rounded-full'}"
+            ></button>
+          `).join("");
+        } else {
+          dotsContainer.innerHTML = "";
+          dotsContainer.classList.add("hidden");
+        }
       }
 
       if (window.lucide) window.lucide.createIcons();
@@ -10636,10 +10647,10 @@ ${closing}`;
     /**
      * PENGOLAHAN FOTO LOKAL & SINKRONISASI KE CLOUD FIRESTORE
      */
-    function compressImageFile(file, maxWidth = 720, maxHeight = 720, quality = 0.8) {
+    function compressImageFile(file, maxWidth = 720, maxHeight = 720, quality = 0.8, preserveAlpha = false) {
       return new Promise((resolve, reject) => {
         if (!file || !file.type.startsWith("image/")) {
-          return reject(new Error("Silakan pilih file gambar yang valid (JPG, PNG, atau WEBP)!"));
+          return reject(new Error("Silakan pilih file gambar yang valid (JPG, PNG, WEBP, atau SVG)!"));
         }
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -10665,12 +10676,19 @@ ${closing}`;
             canvas.height = height;
             const ctx = canvas.getContext("2d");
             if (!ctx) return reject(new Error("Gagal menginisialisasi canvas pemroses foto"));
-            
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, width, height);
+
+            const keepTransparent = preserveAlpha && file.type !== "image/jpeg";
+            if (keepTransparent) {
+              ctx.clearRect(0, 0, width, height);
+            } else {
+              ctx.fillStyle = "#ffffff";
+              ctx.fillRect(0, 0, width, height);
+            }
             ctx.drawImage(img, 0, 0, width, height);
-            
-            const compressedDataUrl = canvas.toDataURL("image/jpeg", quality);
+
+            const compressedDataUrl = keepTransparent
+              ? canvas.toDataURL("image/png")
+              : canvas.toDataURL("image/jpeg", quality);
             resolve(compressedDataUrl);
           };
           img.onerror = () => reject(new Error("File gambar tidak dapat dibaca."));
