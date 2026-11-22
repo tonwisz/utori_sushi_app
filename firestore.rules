@@ -2,9 +2,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Global Safety Net: Default-deny all operations
+    // Global POS Kasir Access: Izinkan perangkat POS Kasir yang login Firebase Auth membaca/menulis semua koleksinya
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if request.auth != null;
     }
 
     // Startup connectivity check document
@@ -137,6 +137,12 @@ service cloud.firestore {
       allow get: if isValidId(productId);
       allow list: if true;
       allow write: if isValidId(productId);
+    }
+
+    match /menu/{menuId} {
+      allow get: if isValidId(menuId);
+      allow list: if true;
+      allow write: if isValidId(menuId);
     }
 
     match /extras/{extraId} {

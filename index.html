@@ -500,12 +500,14 @@
         await deleteDoc(doc(db, "accounts", accId, "users", userId));
       },
 
-      listenBranches(callback) {
+      listenBranches(callback, onError) {
         if (branchesListUnsub) {
           branchesListUnsub();
           branchesListUnsub = null;
         }
+        window.FIRESTORE_BRANCHES_ERROR = null;
         branchesListUnsub = onSnapshot(collection(db, "branches"), (snap) => {
+          window.FIRESTORE_BRANCHES_ERROR = null;
           const list = [];
           snap.forEach((d) => {
             const data = d.data() || {};
@@ -516,7 +518,12 @@
             return String(a.name || "").localeCompare(String(b.name || ""));
           });
           if (typeof callback === "function") callback(list);
-        }, (err) => console.error("listenBranches error:", err));
+        }, (err) => {
+          console.error("listenBranches error:", err);
+          window.FIRESTORE_BRANCHES_ERROR = err?.message || "Akses ditolak Firestore Rules.";
+          if (typeof onError === "function") onError(err);
+          if (typeof renderAdminBranchesList === "function") renderAdminBranchesList();
+        });
         return branchesListUnsub;
       },
 
@@ -783,6 +790,45 @@
           console.error("listenToOrderStatus error:", e);
           return null;
         }
+      },
+
+      async fetchLegacyRootCatalog() {
+        const errors = [];
+        const readCol = async (colName) => {
+          try {
+            const snap = await getDocs(collection(db, colName));
+            const list = [];
+            snap.forEach((d) => {
+              const data = d.data() || {};
+              list.push({ ...data, id: sanitizeDocId(data.id ?? d.id, colName.slice(0, 4), list.length) });
+            });
+            return list;
+          } catch (e) {
+            console.warn(`fetchLegacyRootCatalog (${colName}):`, e);
+            errors.push(`${colName}: ${e?.code || e?.message || "Akses ditolak"}`);
+            return [];
+          }
+        };
+
+        const [products, menu, categories, extras, packages] = await Promise.all([
+          readCol("products"),
+          readCol("menu"),
+          readCol("categories"),
+          readCol("extras"),
+          readCol("packages")
+        ]);
+
+        let androidCatNames = [];
+        try {
+          const catDoc = await getDoc(doc(db, "settings", "categories"));
+          if (catDoc.exists() && Array.isArray(catDoc.data()?.list)) {
+            androidCatNames = catDoc.data().list;
+          }
+        } catch (e) {
+          errors.push(`settings/categories: ${e?.code || e?.message || "Akses ditolak"}`);
+        }
+
+        return { products, menu, categories, androidCatNames, extras, packages, errors };
       },
 
       initFirestoreDataSync() {
@@ -3096,6 +3142,15 @@
           </div>
           <div class="flex items-center gap-2 flex-wrap">
             <button 
+              onclick="importLegacyPosCatalogToBranch()" 
+              id="btnImportLegacyPosCatalog"
+              class="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
+              title="Salin data produk, menu, kategori, ekstra & paket lama POS dari koleksi root Firestore ke cabang aktif"
+            >
+              <i data-lucide="download-cloud" class="w-3.5 h-3.5"></i>
+              <span>Impor dari POS Root</span>
+            </button>
+            <button 
               onclick="syncAllMenuVariations()" 
               class="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
               title="Lengkapi produk tanpa variasi dengan pilihan standar"
@@ -4825,7 +4880,7 @@
 
     function resolveProductImage(item) {
       if (!item || typeof item !== "object") return DEFAULT_NEUTRAL_PLACEHOLDER_IMG;
-      const candidates = [item.image, item.imageUri];
+      const candidates = [item.image, item.imageUri, item.foto, item.photo, item.gambar, item.img, item.thumbnail];
       for (const raw of candidates) {
         if (typeof raw === "string") {
           const s = raw.trim();
@@ -4884,12 +4939,16 @@
     function normalizeProductRecord(rawProd, idx = 0) {
       const p = { ...(rawProd || {}) };
       p.id = normalizeSafeId(p.id, "prod", idx);
-      p.name = String(p.name || "Produk Tanpa Nama");
-      p.description = typeof p.description === "string" ? p.description : "";
-      p.price = Number(p.price) || 0;
+      p.name = String(p.name ?? p.nama ?? p.title ?? "Produk Tanpa Nama");
+      p.description = typeof p.description === "string"
+        ? p.description
+        : (typeof p.deskripsi === "string" ? p.deskripsi : "");
+      p.price = Number(p.price ?? p.harga) || 0;
+      p.category = p.category ?? p.kategori ?? "Umum";
 
-      if (p.stock !== undefined && p.stock !== null && p.stock !== "") {
-        p.stock = Math.max(0, Number(p.stock) || 0);
+      const rawStock = p.stock ?? p.stok;
+      if (rawStock !== undefined && rawStock !== null && rawStock !== "") {
+        p.stock = Math.max(0, Number(rawStock) || 0);
       }
 
       if (p.hasVariations === false) {
@@ -7405,7 +7464,11 @@ ${closing}`;
       renderUserBranchCheckboxes();
 
       if (!BRANCHES || BRANCHES.length === 0) {
-        container.innerHTML = `<div class="p-3 bg-white border border-dashed border-stone-300 rounded-xl text-stone-500 text-center">Belum ada cabang terdaftar. Tambahkan cabang baru di formulir di atas.</div>`;
+        if (window.FIRESTORE_BRANCHES_ERROR) {
+          container.innerHTML = `<div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-center text-[11px] font-semibold">Gagal memuat daftar cabang dari Firestore: ${window.FIRESTORE_BRANCHES_ERROR}. Pastikan Firestore Rules untuk koleksi <code>branches</code> sudah di-Publish di Firebase Console.</div>`;
+        } else {
+          container.innerHTML = `<div class="p-3 bg-white border border-dashed border-stone-300 rounded-xl text-stone-500 text-center">Belum ada cabang terdaftar. Tambahkan cabang baru di formulir di atas.</div>`;
+        }
         return;
       }
 
@@ -7512,10 +7575,24 @@ ${closing}`;
           ownerEmail: ADMIN_SESSION.email
         };
         await window.FirestoreSync.saveBranch(payload);
+        const existingIdx = BRANCHES.findIndex(b => b.id === id);
+        if (existingIdx !== -1) {
+          BRANCHES[existingIdx] = { ...BRANCHES[existingIdx], ...payload };
+        } else {
+          BRANCHES.push(payload);
+        }
+        renderAdminBranchesList();
+        populateAdminBranchSwitcher();
+        renderConsumerBranchBanner();
         resetBranchForm();
-        showToast(`✅ Cabang "${name}" berhasil disimpan!`, 3000);
+        showToast(`Cabang "${name}" berhasil disimpan!`, 3000);
       } catch (err) {
-        showToast(err?.message || "Gagal menyimpan cabang.", 3000);
+        const msg = err?.message || "Gagal menyimpan cabang.";
+        if (msg.toLowerCase().includes("permission")) {
+          showToast("Missing or insufficient permissions: pastikan Rules untuk branches/{branchId} sudah di-Publish di Firebase Console.", 4500);
+        } else {
+          showToast(msg, 3000);
+        }
       }
     }
 
@@ -10391,6 +10468,135 @@ ${closing}`;
       renderHeroSlideshow();
       updateCartUI();
       showToast("Katalog produk & kategori cabang dikosongkan ke template awal.");
+    }
+
+    async function importLegacyPosCatalogToBranch() {
+      if (!window.FirestoreSync || !window.FirestoreSync.fetchLegacyRootCatalog) {
+        showToast("Koneksi Firestore belum siap.", 3000);
+        return;
+      }
+      const btn = document.getElementById("btnImportLegacyPosCatalog");
+      if (btn) btn.disabled = true;
+      showToast("Mengambil katalog lama POS (products, menu, categories, extras, packages)...", 2500);
+
+      try {
+        const legacy = await window.FirestoreSync.fetchLegacyRootCatalog();
+        let addedCat = 0;
+        let addedProd = 0;
+        let addedExtra = 0;
+        let addedPkg = 0;
+
+        if (Array.isArray(legacy.categories)) {
+          legacy.categories.forEach((c, idx) => {
+            const cName = String(c?.name ?? c?.nama ?? "").trim();
+            if (!cName) return;
+            const exists = CATEGORIES.some(ex => ex.id === c.id || (ex.name && ex.name.trim().toLowerCase() === cName.toLowerCase()));
+            if (!exists) {
+              CATEGORIES.push({ id: normalizeSafeId(c.id, "cat", idx), name: cName });
+              addedCat++;
+            }
+          });
+        }
+        if (Array.isArray(legacy.androidCatNames) && ensureCategoryNamesExist(legacy.androidCatNames)) {
+          addedCat++;
+        }
+
+        const existingProdIds = new Set(PRODUCTS.map(p => String(p.id)));
+        const existingProdNames = new Set(PRODUCTS.map(p => String(p.name || "").trim().toLowerCase()));
+        const combinedRawProds = [...(legacy.products || []), ...(legacy.menu || [])];
+
+        combinedRawProds.forEach((raw, idx) => {
+          const norm = normalizeProductRecord(raw, idx);
+          const nameKey = norm.name.trim().toLowerCase();
+          if (existingProdIds.has(String(norm.id)) || (nameKey && existingProdNames.has(nameKey))) {
+            return;
+          }
+          if (norm.category) {
+            norm.category = resolveCategoryLabel(norm.category);
+          }
+          PRODUCTS.push(norm);
+          existingProdIds.add(String(norm.id));
+          if (nameKey) existingProdNames.add(nameKey);
+          addedProd++;
+        });
+
+        const productCatNames = PRODUCTS.map(p => p.category).filter(c => c && !String(c).startsWith("cat_"));
+        if (ensureCategoryNamesExist(productCatNames)) {
+          addedCat++;
+        }
+
+        if (Array.isArray(legacy.extras)) {
+          const existingExtIds = new Set(EXTRAS.map(e => String(e.id)));
+          legacy.extras.forEach((ex, idx) => {
+            const id = normalizeSafeId(ex?.id, "ext", idx);
+            const name = String(ex?.name ?? ex?.nama ?? "").trim();
+            if (!name || existingExtIds.has(id)) return;
+            EXTRAS.push({
+              id,
+              name,
+              price: Number(ex?.price ?? ex?.harga) || 0,
+              enabled: ex?.enabled !== false
+            });
+            existingExtIds.add(id);
+            addedExtra++;
+          });
+        }
+
+        if (Array.isArray(legacy.packages)) {
+          const existingPkgIds = new Set(PACKAGE_MENUS.map(p => String(p.id)));
+          legacy.packages.forEach((pkg, idx) => {
+            const id = normalizeSafeId(pkg?.id, "pkg", idx);
+            const name = String(pkg?.name ?? pkg?.nama ?? "").trim();
+            if (!name || existingPkgIds.has(id)) return;
+            PACKAGE_MENUS.push({
+              ...pkg,
+              id,
+              name,
+              price: Number(pkg?.price ?? pkg?.harga) || 0,
+              image: resolveProductImage(pkg),
+              enabled: pkg?.enabled !== false
+            });
+            existingPkgIds.add(id);
+            addedPkg++;
+          });
+        }
+
+        if (addedCat + addedProd + addedExtra + addedPkg === 0) {
+          const totalFound = (legacy.products?.length || 0) + (legacy.menu?.length || 0) + (legacy.extras?.length || 0) + (legacy.packages?.length || 0);
+          if (legacy.errors && legacy.errors.length > 0) {
+            showToast(`Gagal baca beberapa koleksi root (${legacy.errors.join("; ")}). Pastikan Rules Firebase Console sudah dipublish.`, 5000);
+          } else if (totalFound > 0) {
+            showToast(`Ditemukan ${legacy.products.length} di products & ${legacy.menu.length} di menu — semuanya sudah ada di cabang ini.`, 4000);
+          } else {
+            showToast("Koleksi root POS (products, menu, extras, packages) memang kosong.", 3500);
+          }
+          return;
+        }
+
+        saveAdminCategories();
+        saveAdminProducts();
+        saveAdminExtras();
+        saveAdminPackages();
+
+        renderCategoryTabs();
+        renderAdminCategoryList();
+        renderAdminMenuList();
+        renderAdminExtrasList();
+        renderAdminPackageList();
+        renderProducts();
+        renderPackageMenuCards();
+        renderAdminSlideshowSettings();
+        renderHeroSlideshow();
+        updateCartUI();
+
+        const warnMsg = (legacy.errors && legacy.errors.length > 0) ? ` (Catatan: ${legacy.errors.join(", ")})` : "";
+        showToast(`Berhasil impor ke cabang "${ACTIVE_BRANCH_ID}": +${addedProd} produk, +${addedExtra} ekstra, +${addedPkg} paket!${warnMsg}`, 4500);
+      } catch (err) {
+        console.error("importLegacyPosCatalogToBranch error:", err);
+        showToast("Gagal impor katalog POS: " + (err?.message || err), 3500);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
     }
 
     function saveAdminAppearance() {
