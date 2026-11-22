@@ -235,6 +235,14 @@
           if (window.onFirestorePackagesUpdate) window.onFirestorePackagesUpdate(list, bId);
         }, (err) => console.error("Packages listener error:", err))
       );
+
+      branchScopedUnsubs.push(
+        onSnapshot(doc(db, "branches", bId, "settings", "variationGroups"), (snap) => {
+          if (window.onFirestoreVariationGroupsUpdate) {
+            window.onFirestoreVariationGroupsUpdate(snap.exists() ? snap.data() : null, bId);
+          }
+        }, (err) => console.error("Variation groups listener error:", err))
+      );
     }
 
     window.FirestoreSync = {
@@ -598,12 +606,27 @@
           if (srcCatListSnap.exists()) {
             await setDoc(doc(db, "branches", dstId, "settings", "categories"), cleanFirestorePayload(srcCatListSnap.data()));
           }
+          const srcVarGroupsSnap = await getDoc(doc(db, "branches", srcId, "settings", "variationGroups"));
+          if (srcVarGroupsSnap.exists()) {
+            await setDoc(doc(db, "branches", dstId, "settings", "variationGroups"), cleanFirestorePayload(srcVarGroupsSnap.data()));
+          }
         }
         return true;
       },
 
       switchBranchListeners,
       stopBranchListeners,
+
+      async syncVariationGroupsToFirestore(groups, branchId) {
+        try {
+          if (!Array.isArray(groups)) return;
+          const bId = resolveBranchId(branchId);
+          await setDoc(
+            doc(db, "branches", bId, "settings", "variationGroups"),
+            cleanFirestorePayload({ groups, updatedAt: Date.now() })
+          );
+        } catch (e) { console.error("Error syncVariationGroupsToFirestore:", e); }
+      },
 
       async syncAppearanceToFirestore(appearanceData, branchId) {
         try {
@@ -3168,7 +3191,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3 bg-amber-50/70 p-3.5 rounded-xl border border-amber-200">
           <div>
             <h4 class="font-bold text-xs sm:text-sm text-stone-900">Kelola Produk, Foto, Variasi &amp; Harga</h4>
-            <p class="text-[11px] text-stone-500">Klik tombol <strong>"Atur Variasi"</strong> pada setiap produk untuk mengubah pilihan ukuran, level, atau tambahan.</p>
+            <p class="text-[11px] text-stone-500">Klik <strong>"Grup Variasi"</strong> untuk membuat grup &amp; opsi harga, atau klik <strong>"Atur Variasi"</strong> pada tiap menu untuk menghubungkan / melepas grup.</p>
           </div>
           <div class="flex items-center gap-2 flex-wrap">
             <div class="relative inline-block" id="importMenuDropdownWrapper">
@@ -3224,12 +3247,13 @@
               </div>
             </div>
             <button 
-              onclick="syncAllMenuVariations()" 
+              type="button"
+              onclick="openBranchVariationGroupsModal()" 
               class="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
-              title="Lengkapi produk tanpa variasi dengan pilihan standar"
+              title="Buat dan kelola Grup Variasi cabang lalu hubungkan ke produk"
             >
-              <i data-lucide="check-check" class="w-3.5 h-3.5"></i>
-              <span>Lengkapi Variasi</span>
+              <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+              <span>Grup Variasi</span>
             </button>
             <button 
               onclick="toggleAddMenuForm()" 
@@ -4020,7 +4044,7 @@
   <!-- ==================== MODAL KHUSUS EDIT VARIASI MENU (ADMIN) ==================== -->
   <div 
     id="adminVarEditModalBackdrop" 
-    class="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs opacity-0 pointer-events-none transition-opacity duration-200 flex items-center justify-center p-3 sm:p-5"
+    class="fixed inset-0 z-[140] bg-black/75 backdrop-blur-xs opacity-0 pointer-events-none transition-opacity duration-200 flex items-center justify-center p-3 sm:p-5"
     onclick="handleAdminVarEditBackdropClick(event)"
   >
     <div 
@@ -4029,17 +4053,17 @@
     >
       <!-- Header Edit Variasi -->
       <div class="px-5 py-4 bg-jp-sumi text-white flex items-center justify-between shrink-0">
-        <div class="flex items-center gap-2.5">
+        <div class="flex items-center gap-2.5 min-w-0">
           <img id="adminVarEditProductImg" src="" alt="" class="w-10 h-10 rounded-lg object-cover border border-stone-700 shrink-0">
-          <div>
-            <h3 class="font-display font-bold text-base text-white flex items-center gap-2">
-              <span>Atur Variasi Item: </span>
-              <span id="adminVarEditProductName" class="text-amber-400"></span>
+          <div class="min-w-0">
+            <h3 class="font-display font-bold text-base text-white flex items-center gap-1.5 flex-wrap">
+              <span>Atur Variasi Item:</span>
+              <span id="adminVarEditProductName" class="text-amber-400 truncate"></span>
             </h3>
-            <p class="text-[11px] text-stone-400">Tambahkan atau sesuaikan grup variasi (ukuran, level, tambahan/add-on, dll)</p>
+            <p class="text-[11px] text-stone-400">Daftar grup variasi yang sudah dihubungkan dengan menu ini</p>
           </div>
         </div>
-        <button onclick="closeAdminVariationEditor()" class="text-stone-400 hover:text-white p-1">
+        <button type="button" onclick="closeAdminVariationEditor()" class="text-stone-400 hover:text-white p-1 cursor-pointer shrink-0">
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
@@ -4047,54 +4071,44 @@
       <!-- Content Edit Variasi -->
       <div class="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 text-xs">
         
-        <!-- Quick Template Bar -->
-        <div class="bg-stone-50 p-3 rounded-xl border border-stone-200 space-y-2">
-          <span class="font-bold text-stone-800 text-[11px] uppercase tracking-wider block">Terapkan Cepat Template Variasi:</span>
-          <div class="flex flex-wrap gap-1.5">
-            <button 
-              type="button" 
-              onclick="applyVariationTemplateToCurrentItem('size')" 
-              class="px-2.5 py-1 bg-white hover:bg-stone-200 border border-stone-300 rounded-lg font-semibold text-stone-800 transition cursor-pointer"
-            >
-              Template Ukuran & Porsi
-            </button>
-            <button 
-              type="button" 
-              onclick="applyVariationTemplateToCurrentItem('level')" 
-              class="px-2.5 py-1 bg-white hover:bg-stone-200 border border-stone-300 rounded-lg font-semibold text-stone-800 transition cursor-pointer"
-            >
-              Template Level / Es & Gula
-            </button>
-            <button 
-              type="button" 
-              onclick="applyVariationTemplateToCurrentItem('addon')" 
-              class="px-2.5 py-1 bg-white hover:bg-stone-200 border border-stone-300 rounded-lg font-semibold text-stone-800 transition cursor-pointer"
-            >
-              Template Tambahan / Add-on
-            </button>
+        <!-- List Grup Variasi yang Terhubung dengan Menu Ini -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-stone-800 text-[11px] uppercase tracking-wider">Variasi Terhubung dengan Menu Ini</span>
+            <span id="adminVarLinkedCountBadge" class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded-md font-bold text-[10px]">0 Grup</span>
+          </div>
+          <div id="adminVarGroupsList" class="space-y-2">
+            <!-- Populated by JavaScript -->
           </div>
         </div>
 
-        <!-- Dynamic Groups Container -->
-        <div id="adminVarGroupsList" class="space-y-3">
-          <!-- Populated by JavaScript -->
+        <!-- Hubungkan dari Pustaka Grup Variasi Cabang / Buat Baru -->
+        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-2.5">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <span class="font-bold text-stone-800 text-[11px] uppercase tracking-wider block">Hubungkan Grup Variasi Lain</span>
+              <span class="text-[10px] text-stone-500">Klik grup yang sudah dibuat untuk langsung menghubungkannya ke menu ini</span>
+            </div>
+            <button 
+              type="button" 
+              onclick="openVariationGroupCustomizer({ mode: 'create', attachToCurrentProduct: true })" 
+              class="px-2.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white rounded-lg font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shrink-0 shadow-xs"
+            >
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Buat Grup Variasi</span>
+            </button>
+          </div>
+          <div id="adminVarAvailableGroupsList" class="flex flex-wrap gap-1.5">
+            <!-- Populated by JavaScript -->
+          </div>
         </div>
-
-        <!-- Tambah Grup Variasi Kustom Baru -->
-        <button 
-          type="button" 
-          onclick="addNewVariationGroupToCurrentItem()" 
-          class="w-full py-2 bg-stone-100 hover:bg-stone-200 border border-dashed border-stone-300 rounded-xl text-stone-700 font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-        >
-          <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-          <span>+ Tambah Grup Variasi Kustom</span>
-        </button>
 
       </div>
 
       <!-- Footer Edit Variasi -->
       <div class="px-5 py-3.5 bg-stone-100 border-t border-stone-200 flex items-center justify-between shrink-0">
         <button 
+          type="button"
           onclick="removeAllVariationsFromCurrentItem()" 
           class="text-rose-600 hover:text-rose-800 font-semibold text-xs cursor-pointer"
         >
@@ -4102,12 +4116,14 @@
         </button>
         <div class="flex items-center gap-2">
           <button 
+            type="button"
             onclick="closeAdminVariationEditor()" 
             class="px-3.5 py-1.5 bg-white hover:bg-stone-200 border border-stone-300 rounded-lg font-semibold text-xs transition cursor-pointer"
           >
             Batal
           </button>
           <button 
+            type="button"
             onclick="saveCurrentItemVariations()" 
             class="px-4 py-1.5 bg-jp-crimson hover:opacity-90 text-white rounded-lg font-bold text-xs shadow-xs transition cursor-pointer flex items-center gap-1"
           >
@@ -4115,6 +4131,177 @@
             <span>Simpan Variasi</span>
           </button>
         </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ==================== ADMIN MODAL: KELOLA GRUP VARIASI CABANG ==================== -->
+  <div 
+    id="variationGroupsModalBackdrop" 
+    class="fixed inset-0 z-[140] bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 opacity-0 pointer-events-none transition-opacity duration-200"
+    onclick="handleVariationGroupsBackdropClick(event)"
+  >
+    <div 
+      id="variationGroupsModalPanel" 
+      class="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[92vh] transform scale-95 transition-all duration-200"
+    >
+      <!-- Header -->
+      <div class="px-5 py-4 bg-teal-700 text-white flex items-center justify-between shrink-0 gap-3">
+        <div>
+          <h3 class="font-display font-bold text-base text-white flex items-center gap-2">
+            <i data-lucide="layers" class="w-4 h-4 text-amber-300"></i>
+            <span>Grup Variasi Cabang</span>
+          </h3>
+          <p class="text-[11px] text-teal-100 mt-0.5">Buat grup variasi beserta aturan pemilihan &amp; harga opsi, lalu hubungkan ke menu.</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button 
+            type="button" 
+            onclick="openVariationGroupCustomizer({ mode: 'create' })" 
+            class="px-3 py-1.5 bg-white text-teal-800 hover:bg-teal-50 rounded-lg font-bold text-xs flex items-center gap-1 transition cursor-pointer shadow-xs"
+          >
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Buat Grup Variasi</span>
+          </button>
+          <button type="button" onclick="closeBranchVariationGroupsModal()" class="text-teal-100 hover:text-white p-1 cursor-pointer">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 text-xs bg-stone-50/70">
+        <div id="branchVariationGroupsList" class="space-y-2.5">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="px-5 py-3 bg-white border-t border-stone-200 flex items-center justify-between gap-2 shrink-0 text-xs">
+        <span class="text-[11px] text-stone-500">Perubahan grup variasi otomatis tersimpan ke cabang &amp; Cloud Firestore.</span>
+        <button 
+          type="button" 
+          onclick="closeBranchVariationGroupsModal()" 
+          class="px-4 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-lg font-bold cursor-pointer"
+        >
+          Tutup
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== ADMIN DIALOG: BUAT / EDIT GRUP VARIASI (POS STYLE) ==================== -->
+  <div 
+    id="variationGroupEditorModalBackdrop" 
+    class="fixed inset-0 z-[150] bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 opacity-0 pointer-events-none transition-opacity duration-200"
+    onclick="handleVariationGroupEditorBackdropClick(event)"
+  >
+    <div 
+      id="variationGroupEditorModalPanel" 
+      class="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[92vh] transform scale-95 transition-all duration-200"
+    >
+      <!-- Header Teal POS Style -->
+      <div class="px-5 py-4 bg-teal-700 text-white flex items-start justify-between shrink-0 gap-3">
+        <div>
+          <h3 id="vgEditorTitle" class="font-display font-bold text-lg text-white leading-tight">
+            Buat grup variasi
+          </h3>
+          <p class="text-xs text-teal-50/90 mt-1 leading-snug">
+            Atur nama grup, aturan pemilihan, serta opsi dan harga.
+          </p>
+        </div>
+        <button 
+          type="button" 
+          onclick="closeVariationGroupCustomizer()" 
+          class="text-white/85 hover:text-white p-1 -mr-1 cursor-pointer shrink-0"
+          aria-label="Tutup dialog"
+        >
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Form Body -->
+      <div class="flex-1 overflow-y-auto p-5 space-y-5 text-sm">
+        
+        <!-- Nama Grup -->
+        <div>
+          <label for="vgEditorNameInput" class="block text-[11px] font-bold text-stone-500 uppercase tracking-wider mb-1">
+            Nama Grup Variasi
+          </label>
+          <input 
+            type="text" 
+            id="vgEditorNameInput" 
+            placeholder="Contoh: Level Matang, Ukuran, Topping" 
+            class="w-full py-2 px-0.5 text-base font-medium text-stone-900 bg-transparent border-0 border-b-2 border-stone-300 focus:border-teal-700 focus:outline-none transition"
+          >
+        </div>
+
+        <!-- Aturan Pemilihan -->
+        <div class="space-y-2.5">
+          <p class="font-bold text-xs text-stone-900">Aturan pemilihan</p>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2.5 cursor-pointer select-none py-0.5">
+              <input 
+                type="radio" 
+                name="vgSelectionRule" 
+                value="single_required" 
+                checked 
+                class="w-4 h-4 accent-teal-700 cursor-pointer"
+              >
+              <span class="text-sm text-stone-800">Wajib pilih satu (radio)</span>
+            </label>
+            <label class="flex items-center gap-2.5 cursor-pointer select-none py-0.5">
+              <input 
+                type="radio" 
+                name="vgSelectionRule" 
+                value="multiple_optional" 
+                class="w-4 h-4 accent-teal-700 cursor-pointer"
+              >
+              <span class="text-sm text-stone-800">Boleh pilih beberapa (opsional)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Opsi dan Harga -->
+        <div class="space-y-2.5">
+          <div class="flex items-center justify-between">
+            <p class="font-bold text-xs text-stone-900">Opsi dan harga</p>
+            <span class="text-[11px] text-stone-400">Harga tambahan (Rp)</span>
+          </div>
+
+          <div id="vgEditorOptionsList" class="space-y-2.5">
+            <!-- Populated by JavaScript -->
+          </div>
+
+          <button 
+            type="button" 
+            onclick="addVariationGroupOptionRow()" 
+            class="mt-1 inline-flex items-center gap-1.5 text-xs font-bold text-teal-700 hover:text-teal-900 py-1.5 px-2.5 rounded-lg hover:bg-teal-50 transition cursor-pointer"
+          >
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            <span>Tambah Opsi</span>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Footer Buttons (BATAL / SIMPAN POS Style) -->
+      <div class="px-5 py-3.5 bg-white border-t border-stone-100 flex items-center justify-end gap-5 shrink-0">
+        <button 
+          type="button" 
+          onclick="closeVariationGroupCustomizer()" 
+          class="px-3 py-1.5 text-xs font-bold tracking-wider uppercase text-teal-700 hover:bg-teal-50 rounded-lg transition cursor-pointer"
+        >
+          BATAL
+        </button>
+        <button 
+          type="button" 
+          onclick="saveVariationGroupCustomizer()" 
+          class="px-4 py-1.5 text-xs font-bold tracking-wider uppercase text-teal-700 hover:bg-teal-50 rounded-lg transition cursor-pointer"
+        >
+          SIMPAN
+        </button>
       </div>
 
     </div>
@@ -4180,7 +4367,7 @@
   </div>
 
   <!-- ==================== TOAST NOTIFICATION CONTAINER ==================== -->
-  <div id="toastContainer" class="fixed bottom-4 right-4 z-[150] flex flex-col gap-2 pointer-events-none"></div>
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-[160] flex flex-col gap-2 pointer-events-none"></div>
 
   <!-- ==================== 6. FOOTER ==================== -->
   <footer class="bg-jp-sumi text-stone-400 text-xs py-10 border-t border-stone-800">
@@ -4474,6 +4661,7 @@
     let PRODUCTS = [...DEFAULT_PRODUCTS];
     let EXTRAS = [...DEFAULT_EXTRAS];
     let PACKAGE_MENUS = [...DEFAULT_PACKAGE_MENUS];
+    let VARIATION_GROUPS = [];
     let cart = [];
     let activeCategory = "semua";
     let searchQuery = "";
@@ -4486,9 +4674,18 @@
     let currentVariationQuantity = 1;
     let currentSelectedOptions = {};
 
-    // State untuk Editor Variasi Admin
+    // State untuk Editor Variasi Admin & Grup Variasi Cabang
     let adminEditingProduct = null;
     let adminEditingOptions = [];
+    let pendingDeleteBranchVarGroupId = null;
+    let activeAssignProductGroupId = null;
+    let vgEditorState = {
+      mode: "create",
+      groupId: null,
+      attachToCurrentProduct: false,
+      editingCurrentProductIndex: null,
+      options: [{ name: "", price: 0 }]
+    };
 
     // State untuk Slideshow Hero Showcase Banner
     let heroSlideshowIndex = 0;
@@ -4540,7 +4737,7 @@
     function clearBranchLocalStorage(branchKey) {
       if (!branchKey) return;
       const safe = normalizeSafeId(branchKey, "branch", 0);
-      const suffixes = ["config", "appearance", "categories", "products", "extras", "packages", "cart", "delivery_draft"];
+      const suffixes = ["config", "appearance", "categories", "products", "extras", "packages", "variation_groups", "cart", "delivery_draft"];
       try {
         suffixes.forEach((s) => localStorage.removeItem(`mb_${safe}_${s}`));
         const activeSaved = localStorage.getItem("mb_active_branch_id");
@@ -5173,36 +5370,76 @@
       return found ? found.name : (String(catValue || "").trim() || "Umum");
     }
 
+    function formatChoiceLabel(optName, optPrice) {
+      const cleanName = String(optName || "Opsi").trim();
+      const priceNum = Math.max(0, Number(optPrice) || 0);
+      return priceNum > 0 ? `${cleanName} (+Rp ${priceNum.toLocaleString("id-ID")})` : cleanName;
+    }
+
+    function parseChoiceLabel(choiceRaw) {
+      const choiceStr = String(choiceRaw || "").trim();
+      const match = choiceStr.match(/\(\s*\+?Rp\s*([\d.]+)\s*\)/i);
+      const extraPrice = match ? (Number(match[1].replace(/\./g, "")) || 0) : 0;
+      const cleanChoiceName = choiceStr.replace(/\(\s*\+?Rp\s*[\d.]+\s*\)/i, "").trim() || choiceStr;
+      return { name: cleanChoiceName, price: extraPrice };
+    }
+
+    function normalizeVariationGroupRecord(rawGroup, idx = 0) {
+      if (!rawGroup || typeof rawGroup !== "object") return null;
+      const name = String(rawGroup.name || "").trim();
+      if (!name) return null;
+
+      const selType = String(rawGroup.selectionType || "").toLowerCase() === "multiple" ? "multiple" : "single";
+      const isReq = selType === "multiple" ? (rawGroup.required === true) : (rawGroup.required !== false);
+
+      let optionsList = [];
+      if (Array.isArray(rawGroup.options) && rawGroup.options.length > 0) {
+        optionsList = rawGroup.options
+          .map(o => ({
+            name: String(o?.name || "").trim(),
+            price: Math.max(0, Number(o?.price) || 0)
+          }))
+          .filter(o => o.name.length > 0);
+      } else if (Array.isArray(rawGroup.choices) && rawGroup.choices.length > 0) {
+        optionsList = rawGroup.choices
+          .map(c => parseChoiceLabel(c))
+          .filter(o => o.name.length > 0);
+      }
+
+      if (optionsList.length === 0) return null;
+
+      const id = normalizeSafeId(rawGroup.id || name, "vg", idx);
+      const choices = optionsList.map(o => formatChoiceLabel(o.name, o.price));
+
+      return {
+        id,
+        name,
+        selectionType: selType,
+        required: isReq,
+        options: optionsList,
+        choices
+      };
+    }
+
     function buildModifierGroupsFromOptions(options) {
       if (!Array.isArray(options)) return [];
       return options
-        .filter(g => g && g.name && Array.isArray(g.choices) && g.choices.length > 0)
+        .map((g, idx) => normalizeVariationGroupRecord(g, idx))
+        .filter(Boolean)
         .map(g => ({
-          name: String(g.name).trim(),
-          selectionType: g.selectionType || "single",
-          required: g.required !== false,
-          options: g.choices.map(choiceRaw => {
-            const choiceStr = String(choiceRaw || "").trim();
-            const match = choiceStr.match(/\(\s*\+?Rp\s*([\d.]+)\s*\)/i);
-            const extraPrice = match ? (Number(match[1].replace(/\./g, "")) || 0) : 0;
-            const cleanChoiceName = choiceStr.replace(/\(\s*\+?Rp\s*[\d.]+\s*\)/i, "").trim() || choiceStr;
-            return { name: cleanChoiceName, price: extraPrice };
-          })
+          id: g.id,
+          name: g.name,
+          selectionType: g.selectionType,
+          required: g.required,
+          options: g.options.map(o => ({ name: o.name, price: o.price }))
         }));
     }
 
     function buildOptionsFromModifierGroups(modifierGroups) {
       if (!Array.isArray(modifierGroups)) return [];
       return modifierGroups
-        .filter(g => g && g.name && Array.isArray(g.options) && g.options.length > 0)
-        .map(g => ({
-          name: String(g.name).trim(),
-          choices: g.options.map(opt => {
-            const optName = String(opt?.name || "Opsi").trim();
-            const optPrice = Number(opt?.price) || 0;
-            return optPrice > 0 ? `${optName} (+Rp ${optPrice.toLocaleString("id-ID")})` : optName;
-          })
-        }));
+        .map((g, idx) => normalizeVariationGroupRecord(g, idx))
+        .filter(Boolean);
     }
 
     function normalizeProductRecord(rawProd, idx = 0) {
@@ -5492,7 +5729,10 @@
 
       if (Array.isArray(product.options)) {
         product.options.forEach(optGroup => {
-          if (optGroup.choices && optGroup.choices.length > 0) {
+          const isMultiple = optGroup.selectionType === "multiple" || optGroup.required === false;
+          if (isMultiple) {
+            currentSelectedOptions[optGroup.name] = [];
+          } else if (optGroup.choices && optGroup.choices.length > 0) {
             currentSelectedOptions[optGroup.name] = optGroup.choices[0];
           }
         });
@@ -5692,26 +5932,36 @@
       }
 
       container.innerHTML = currentVariationProduct.options.map((optGroup) => {
-        const selectedVal = currentSelectedOptions[optGroup.name];
+        const isMultiple = optGroup.selectionType === "multiple" || optGroup.required === false;
+        const rawSel = currentSelectedOptions[optGroup.name];
+        const selectedArr = Array.isArray(rawSel) ? rawSel : (rawSel ? [rawSel] : []);
+        const statusSummary = isMultiple
+          ? (selectedArr.length > 0 ? `${selectedArr.length} dipilih` : "Opsional · Boleh pilih beberapa")
+          : (selectedArr[0] || "Wajib pilih satu");
 
         return `
           <div class="space-y-2 bg-stone-50 p-3.5 rounded-xl border border-stone-200">
-            <div class="flex items-center justify-between">
-              <span class="font-bold text-stone-900 text-xs">${optGroup.name}:</span>
-              <span class="text-[11px] font-bold text-jp-crimson">${selectedVal || 'Pilih salah satu'}</span>
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-stone-900 text-xs">${optGroup.name}</span>
+                <span class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${isMultiple ? 'bg-teal-100 text-teal-800' : 'bg-rose-100 text-jp-crimson'}">
+                  ${isMultiple ? 'Opsional' : 'Wajib 1'}
+                </span>
+              </div>
+              <span class="text-[11px] font-bold ${isMultiple && selectedArr.length === 0 ? 'text-stone-400' : 'text-jp-crimson'}">${statusSummary}</span>
             </div>
             
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
               ${optGroup.choices.map((choice) => {
-                const isSelected = selectedVal === choice;
+                const isSelected = selectedArr.includes(choice);
                 return `
                   <button 
                     type="button" 
-                    onclick="selectVariationOption('${escapeAttrSingle(optGroup.name)}', '${escapeAttrSingle(choice)}')"
-                    class="p-2.5 rounded-lg border text-left flex items-center justify-between transition cursor-pointer text-xs ${isSelected ? 'border-jp-crimson bg-red-50 text-jp-crimson font-bold shadow-xs' : 'border-stone-200 bg-white text-stone-800 hover:border-stone-300'}"
+                    onclick="selectVariationOption('${escapeAttrSingle(optGroup.name)}', '${escapeAttrSingle(choice)}', ${isMultiple})"
+                    class="p-2.5 rounded-lg border text-left flex items-center justify-between gap-2 transition cursor-pointer text-xs ${isSelected ? 'border-jp-crimson bg-red-50 text-jp-crimson font-bold shadow-xs' : 'border-stone-200 bg-white text-stone-800 hover:border-stone-300'}"
                   >
                     <span>${choice}</span>
-                    <span class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${isSelected ? 'border-jp-crimson bg-jp-crimson text-white' : 'border-stone-300 bg-stone-50'}">
+                    <span class="w-4 h-4 ${isMultiple ? 'rounded' : 'rounded-full'} border flex items-center justify-center shrink-0 text-[10px] ${isSelected ? 'border-jp-crimson bg-jp-crimson text-white' : 'border-stone-300 bg-stone-50'}">
                       ${isSelected ? '✓' : ''}
                     </span>
                   </button>
@@ -5723,10 +5973,38 @@
       }).join("");
     }
 
-    function selectVariationOption(groupName, choice) {
-      currentSelectedOptions[groupName] = choice;
+    function selectVariationOption(groupName, choice, isMultiple = false) {
+      if (isMultiple) {
+        const current = Array.isArray(currentSelectedOptions[groupName])
+          ? [...currentSelectedOptions[groupName]]
+          : (currentSelectedOptions[groupName] ? [currentSelectedOptions[groupName]] : []);
+        const idx = current.indexOf(choice);
+        if (idx >= 0) {
+          current.splice(idx, 1);
+        } else {
+          current.push(choice);
+        }
+        currentSelectedOptions[groupName] = current;
+      } else {
+        currentSelectedOptions[groupName] = choice;
+      }
       renderVariationModalOptionsUI();
       updateVariationModalTotal();
+    }
+
+    function flattenSelectedOptionValues(selectedOptions) {
+      const list = [];
+      if (!selectedOptions || typeof selectedOptions !== "object") return list;
+      Object.values(selectedOptions).forEach(val => {
+        if (Array.isArray(val)) {
+          val.forEach(v => {
+            if (typeof v === "string" && v.trim()) list.push(v.trim());
+          });
+        } else if (typeof val === "string" && val.trim()) {
+          list.push(val.trim());
+        }
+      });
+      return list;
     }
 
     function changeVarQuantity(delta) {
@@ -5740,12 +6018,10 @@
       if (!currentVariationProduct) return;
       let unitPrice = Number(currentVariationProduct.price) || 0;
 
-      Object.values(currentSelectedOptions).forEach(val => {
-        if (typeof val === "string") {
-          const match = val.match(/\+Rp\s*([\d.]+)/i);
-          if (match) {
-            unitPrice += Number(match[1].replace(/\./g, "")) || 0;
-          }
+      flattenSelectedOptionValues(currentSelectedOptions).forEach(val => {
+        const match = val.match(/\+Rp\s*([\d.]+)/i);
+        if (match) {
+          unitPrice += Number(match[1].replace(/\./g, "")) || 0;
         }
       });
 
@@ -5782,19 +6058,27 @@
 
     function addItemToCart(product, quantity, selectedOptions, notes) {
       let unitPrice = Number(product.price) || 0;
-      if (selectedOptions) {
-        Object.values(selectedOptions).forEach(val => {
-          if (typeof val === 'string') {
-            const match = val.match(/\+Rp\s*([\d.]+)/i);
-            if (match) {
-              const extra = Number(match[1].replace(/\./g, '')) || 0;
-              unitPrice += extra;
-            }
-          }
-        });
-      }
+      flattenSelectedOptionValues(selectedOptions).forEach(val => {
+        const match = val.match(/\+Rp\s*([\d.]+)/i);
+        if (match) {
+          const extra = Number(match[1].replace(/\./g, '')) || 0;
+          unitPrice += extra;
+        }
+      });
 
-      const optionKey = Object.entries(selectedOptions || {}).sort().map(([k, v]) => `${k}:${v}`).join("|");
+      const normalizedSelected = {};
+      Object.entries(selectedOptions || {}).forEach(([k, v]) => {
+        if (Array.isArray(v)) {
+          if (v.length > 0) normalizedSelected[k] = [...v];
+        } else if (typeof v === "string" && v.trim()) {
+          normalizedSelected[k] = v;
+        }
+      });
+
+      const optionKey = Object.entries(normalizedSelected)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}:${Array.isArray(v) ? [...v].sort().join("+") : v}`)
+        .join("|");
       const cartItemId = `${product.id}_${optionKey}_${notes}`;
 
       const existingItem = cart.find(item => item.cartItemId === cartItemId);
@@ -5805,7 +6089,7 @@
           cartItemId: cartItemId,
           product: product,
           quantity: quantity,
-          selectedOptions: { ...selectedOptions },
+          selectedOptions: normalizedSelected,
           notes: notes,
           unitPrice: unitPrice
         });
@@ -6023,7 +6307,7 @@
         if (cartItemsContainer) {
           cartItemsContainer.innerHTML = cart.map((item, idx) => {
             const itemSubtotal = item.unitPrice * item.quantity;
-            const optionsArray = Object.entries(item.selectedOptions || {});
+            const flatOptionLabels = flattenSelectedOptionValues(item.selectedOptions);
 
             return `
               <div class="pt-2 first:pt-0 flex items-start gap-2.5">
@@ -6040,9 +6324,9 @@
                     ${item.product.name}
                   </h4>
                   
-                  ${optionsArray.length > 0 ? `
+                  ${flatOptionLabels.length > 0 ? `
                     <div class="text-[10px] text-amber-900 font-semibold leading-tight my-0.5 flex flex-wrap gap-1">
-                      ${optionsArray.map(([k, v]) => `<span class="bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded border border-amber-200">${v}</span>`).join("")}
+                      ${flatOptionLabels.map(lbl => `<span class="bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded border border-amber-200">${lbl}</span>`).join("")}
                     </div>
                   ` : ''}
 
@@ -6934,7 +7218,11 @@
           : `Delivery - ${customerName} (${customerPhoneRaw})`;
 
       const posItems = cart.map(item => {
-        const opts = Object.values(item.selectedOptions || {}).filter(Boolean).join(", ");
+        const opts = flattenSelectedOptionValues(item.selectedOptions).join(", ");
+        const normalizedPosOptions = {};
+        Object.entries(item.selectedOptions || {}).forEach(([k, v]) => {
+          normalizedPosOptions[k] = Array.isArray(v) ? v.join(", ") : v;
+        });
         const noteStr = item.notes ? ` | Catatan: ${item.notes}` : "";
         const priceVal = Number(item.unitPrice) || 0;
         const qtyVal = Number(item.quantity) || 1;
@@ -6946,7 +7234,7 @@
           price: priceVal,
           unitPrice: priceVal,
           subtotal: priceVal * qtyVal,
-          options: item.selectedOptions || {},
+          options: normalizedPosOptions,
           notes: item.notes || ""
         };
       });
@@ -7114,7 +7402,7 @@
 
       const itemsListText = cart.map((item, index) => {
         const itemTotal = item.unitPrice * item.quantity;
-        const optionsList = Object.entries(item.selectedOptions || {}).map(([k, v]) => v).join(", ");
+        const optionsList = flattenSelectedOptionValues(item.selectedOptions).join(", ");
         
         let detailLine = `${index + 1}. *${item.product.name}* (${item.quantity}x) = ${currencyFormatter.format(itemTotal)}`;
         if (optionsList) {
@@ -8521,35 +8809,31 @@ ${closing}`;
         const stockVal = (typeof item.stock === "number" && !Number.isNaN(item.stock)) ? item.stock : 10;
         const optCount = (item.options && Array.isArray(item.options)) ? item.options.length : 0;
 
+        const safeAttrId = String(item.id || "").replace(/"/g, "&quot;");
+        const safeJsId = String(item.id || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+
         return `
-          <div class="p-2 sm:p-2.5 bg-white hover:bg-stone-50/80 rounded-xl border border-stone-200 flex flex-col gap-1.5 text-xs transition shadow-2xs">
+          <div data-product-id="${safeAttrId}" class="admin-menu-row p-2 sm:p-2.5 bg-white hover:bg-stone-50/80 rounded-xl border border-stone-200 flex flex-col gap-1.5 text-xs transition shadow-2xs">
             
             <div class="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
               
               <div class="flex items-center gap-1.5 min-w-0 flex-1">
                 
-                <div class="flex flex-col gap-0.5 shrink-0 -my-0.5">
-                  <button 
-                    type="button" 
-                    onclick="moveMenuItem('${item.id}', -1)" 
-                    ${index === 0 ? 'disabled' : ''} 
-                    class="p-0.5 rounded text-stone-400 hover:text-stone-900 hover:bg-stone-200 disabled:opacity-20 disabled:hover:bg-transparent disabled:cursor-not-allowed transition cursor-pointer" 
-                    title="Geser menu ke atas"
-                  >
-                    <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
-                  </button>
-                  <button 
-                    type="button" 
-                    onclick="moveMenuItem('${item.id}', 1)" 
-                    ${index === filteredItems.length - 1 ? 'disabled' : ''} 
-                    class="p-0.5 rounded text-stone-400 hover:text-stone-900 hover:bg-stone-200 disabled:opacity-20 disabled:hover:bg-transparent disabled:cursor-not-allowed transition cursor-pointer" 
-                    title="Geser menu ke bawah"
-                  >
-                    <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
-                  </button>
-                </div>
+                <button 
+                  type="button" 
+                  onpointerdown="startMenuDrag(event, '${safeJsId}')" 
+                  onkeydown="if(event.key==='ArrowUp'){event.preventDefault();moveMenuItem('${safeJsId}',-1);}else if(event.key==='ArrowDown'){event.preventDefault();moveMenuItem('${safeJsId}',1);}" 
+                  class="admin-menu-drag-handle p-1.5 -ml-0.5 rounded-lg text-stone-400 hover:text-stone-800 hover:bg-stone-100 active:bg-stone-200 cursor-grab active:cursor-grabbing touch-none shrink-0 transition select-none" 
+                  title="Tahan & seret untuk mengubah urutan menu"
+                  aria-label="Seret untuk mengubah urutan menu"
+                >
+                  <svg class="w-4 h-4 pointer-events-none" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                    <line x1="2.5" y1="5.5" x2="13.5" y2="5.5"></line>
+                    <line x1="2.5" y1="10.5" x2="13.5" y2="10.5"></line>
+                  </svg>
+                </button>
 
-                <span class="font-mono text-stone-400 text-[10px] w-4 shrink-0 text-right">${index + 1}.</span>
+                <span class="admin-menu-order-num font-mono text-stone-400 text-[10px] w-4 shrink-0 text-right">${index + 1}.</span>
                 
                 <div class="relative group/thumb shrink-0">
                   <img 
@@ -10119,13 +10403,542 @@ ${closing}`;
       if (window.lucide) window.lucide.createIcons();
     }
 
-    function openAdminVariationEditor(productId) {
+    function saveAdminVariationGroups() {
+      try {
+        window.VARIATION_GROUPS = VARIATION_GROUPS;
+        localStorage.setItem(getBranchStorageKey("variation_groups"), JSON.stringify(VARIATION_GROUPS));
+        if (window.FirestoreSync && window.FirestoreSync.syncVariationGroupsToFirestore) {
+          window.FirestoreSync.syncVariationGroupsToFirestore(VARIATION_GROUPS, ACTIVE_BRANCH_ID);
+        }
+      } catch (e) {}
+    }
 
+    function loadAdminVariationGroups() {
+      VARIATION_GROUPS = [];
+      try {
+        const saved = localStorage.getItem(getBranchStorageKey("variation_groups"));
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            VARIATION_GROUPS = parsed.map((g, idx) => normalizeVariationGroupRecord(g, idx)).filter(Boolean);
+          }
+        }
+      } catch (e) {}
+      if (VARIATION_GROUPS.length === 0 && Array.isArray(PRODUCTS) && PRODUCTS.length > 0) {
+        const seenNames = new Set();
+        PRODUCTS.forEach((p, pIdx) => {
+          (p.options || []).forEach((g, gIdx) => {
+            const norm = normalizeVariationGroupRecord(g, pIdx * 10 + gIdx);
+            if (norm && !seenNames.has(norm.name.toLowerCase())) {
+              seenNames.add(norm.name.toLowerCase());
+              VARIATION_GROUPS.push(norm);
+            }
+          });
+        });
+      }
+      window.VARIATION_GROUPS = VARIATION_GROUPS;
+    }
+
+    function isGroupLinkedToProduct(group, product) {
+      if (!group || !product || !Array.isArray(product.options)) return false;
+      const gid = String(group.id || "").trim().toLowerCase();
+      const gname = String(group.name || "").trim().toLowerCase();
+      return product.options.some(po => {
+        const pid = String(po?.id || "").trim().toLowerCase();
+        const pname = String(po?.name || "").trim().toLowerCase();
+        return (gid && pid && gid === pid) || (gname && pname && gname === pname);
+      });
+    }
+
+    function applyNormalizedGroupToProductOptions(product, group) {
+      if (!product || !group) return false;
+      const list = Array.isArray(product.options) ? [...product.options] : [];
+      const gid = String(group.id || "").trim().toLowerCase();
+      const gname = String(group.name || "").trim().toLowerCase();
+      const cloned = JSON.parse(JSON.stringify(group));
+      const existingIdx = list.findIndex(po => {
+        const pid = String(po?.id || "").trim().toLowerCase();
+        const pname = String(po?.name || "").trim().toLowerCase();
+        return (gid && pid && gid === pid) || (gname && pname && gname === pname);
+      });
+      if (existingIdx >= 0) {
+        list[existingIdx] = cloned;
+      } else {
+        list.push(cloned);
+      }
+      product.options = list;
+      product.modifierGroups = buildModifierGroupsFromOptions(list);
+      product.hasVariations = list.length > 0;
+      product.variations = list.length > 0 ? list.map(o => o.name).join(", ") : "Tanpa Varian";
+      product.updatedAt = Date.now();
+      return true;
+    }
+
+    function detachGroupFromProductOptions(product, group) {
+      if (!product || !group || !Array.isArray(product.options)) return false;
+      const gid = String(group.id || "").trim().toLowerCase();
+      const gname = String(group.name || "").trim().toLowerCase();
+      const next = product.options.filter(po => {
+        const pid = String(po?.id || "").trim().toLowerCase();
+        const pname = String(po?.name || "").trim().toLowerCase();
+        return !((gid && pid && gid === pid) || (gname && pname && gname === pname));
+      });
+      if (next.length === product.options.length) return false;
+      product.options = next;
+      product.modifierGroups = buildModifierGroupsFromOptions(next);
+      product.hasVariations = next.length > 0;
+      product.variations = next.length > 0 ? next.map(o => o.name).join(", ") : "Tanpa Varian";
+      product.updatedAt = Date.now();
+      return true;
+    }
+
+    // ---------- MODAL 1: KELOLA GRUP VARIASI CABANG ----------
+    function openBranchVariationGroupsModal() {
+      pendingDeleteBranchVarGroupId = null;
+      activeAssignProductGroupId = null;
+      renderBranchVariationGroupsList();
+
+      const backdrop = document.getElementById("variationGroupsModalBackdrop");
+      const panel = document.getElementById("variationGroupsModalPanel");
+      if (!backdrop || !panel) return;
+      backdrop.classList.remove("pointer-events-none", "opacity-0");
+      backdrop.classList.add("opacity-100");
+      panel.classList.remove("scale-95");
+      panel.classList.add("scale-100");
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function closeBranchVariationGroupsModal() {
+      const backdrop = document.getElementById("variationGroupsModalBackdrop");
+      const panel = document.getElementById("variationGroupsModalPanel");
+      if (!backdrop || !panel) return;
+      panel.classList.remove("scale-100");
+      panel.classList.add("scale-95");
+      backdrop.classList.remove("opacity-100");
+      backdrop.classList.add("opacity-0", "pointer-events-none");
+      pendingDeleteBranchVarGroupId = null;
+      activeAssignProductGroupId = null;
+    }
+
+    function handleVariationGroupsBackdropClick(e) {
+      if (e.target === document.getElementById("variationGroupsModalBackdrop")) {
+        closeBranchVariationGroupsModal();
+      }
+    }
+
+    function renderBranchVariationGroupsList() {
+      const container = document.getElementById("branchVariationGroupsList");
+      if (!container) return;
+
+      if (!Array.isArray(VARIATION_GROUPS) || VARIATION_GROUPS.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-10 px-4 bg-white rounded-xl border border-dashed border-stone-300 space-y-3">
+            <div class="w-12 h-12 mx-auto rounded-xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-700">
+              <i data-lucide="layers" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <p class="font-bold text-sm text-stone-800">Belum Ada Grup Variasi Tersimpan</p>
+              <p class="text-[11px] text-stone-500 mt-1 max-w-sm mx-auto">
+                Buat grup variasi seperti Level Matang, Ukuran, atau Topping beserta aturan pemilihan dan harga opsinya, lalu hubungkan ke menu cabang ini.
+              </p>
+            </div>
+            <button 
+              type="button" 
+              onclick="openVariationGroupCustomizer({ mode: 'create' })" 
+              class="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <span>Buat Grup Variasi Pertama</span>
+            </button>
+          </div>
+        `;
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
+
+      container.innerHTML = VARIATION_GROUPS.map((group) => {
+        const isMultiple = group.selectionType === "multiple" || group.required === false;
+        const ruleBadge = isMultiple
+          ? `<span class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[10px] font-bold">Boleh pilih beberapa (opsional)</span>`
+          : `<span class="px-2 py-0.5 bg-teal-100 text-teal-800 rounded text-[10px] font-bold">Wajib pilih satu (radio)</span>`;
+        const linkedCount = PRODUCTS.filter(p => isGroupLinkedToProduct(group, p)).length;
+        const safeJsGid = String(group.id).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        const isConfirmingDelete = pendingDeleteBranchVarGroupId === group.id;
+        const isAssigning = activeAssignProductGroupId === group.id;
+
+        const optsHtml = (group.options || []).map(o => {
+          const pLabel = Number(o.price) > 0 ? ` <span class="text-teal-700 font-mono">+Rp ${Number(o.price).toLocaleString("id-ID")}</span>` : "";
+          return `<span class="px-2 py-0.5 bg-stone-100 border border-stone-200 rounded-md text-[11px] text-stone-700 font-medium">${o.name}${pLabel}</span>`;
+        }).join("");
+
+        return `
+          <div class="bg-white rounded-xl border border-stone-200 p-3.5 space-y-2.5 shadow-2xs">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div class="space-y-1 min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h4 class="font-bold text-sm text-stone-900">${group.name}</h4>
+                  ${ruleBadge}
+                </div>
+                <p class="text-[10px] text-stone-500">Terhubung ke <strong class="text-stone-800">${linkedCount} menu</strong></p>
+              </div>
+
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button 
+                  type="button" 
+                  onclick="toggleGroupProductAssignPanel('${safeJsGid}')" 
+                  class="px-2.5 py-1 ${isAssigning ? 'bg-teal-700 text-white' : 'bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200'} rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <i data-lucide="link" class="w-3 h-3"></i>
+                  <span>Hubungkan ke Menu</span>
+                </button>
+                <button 
+                  type="button" 
+                  onclick="openVariationGroupCustomizer({ mode: 'edit', groupId: '${safeJsGid}' })" 
+                  class="p-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg cursor-pointer transition"
+                  title="Edit grup variasi"
+                >
+                  <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                </button>
+                ${isConfirmingDelete ? `
+                  <button 
+                    type="button" 
+                    onclick="executeDeleteBranchVariationGroup('${safeJsGid}')" 
+                    class="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                  >
+                    Hapus
+                  </button>
+                  <button 
+                    type="button" 
+                    onclick="cancelDeleteBranchVariationGroup()" 
+                    class="px-2 py-1 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-lg text-[10px] font-semibold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                ` : `
+                  <button 
+                    type="button" 
+                    onclick="promptDeleteBranchVariationGroup('${safeJsGid}')" 
+                    class="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg cursor-pointer transition"
+                    title="Hapus grup variasi"
+                  >
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                  </button>
+                `}
+              </div>
+            </div>
+
+            <div class="flex flex-wrap gap-1.5">${optsHtml}</div>
+
+            ${isAssigning ? `
+              <div class="mt-2 pt-2.5 border-t border-stone-200 space-y-2 bg-stone-50/80 p-3 rounded-lg">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <span class="font-bold text-[11px] text-stone-800">Pilih menu yang menggunakan grup "${group.name}":</span>
+                  <div class="flex items-center gap-2 text-[10px]">
+                    <button type="button" onclick="toggleAllGroupAssignCheckboxes('${safeJsGid}', true)" class="text-teal-700 font-bold hover:underline cursor-pointer">Pilih Semua</button>
+                    <button type="button" onclick="toggleAllGroupAssignCheckboxes('${safeJsGid}', false)" class="text-stone-500 font-semibold hover:underline cursor-pointer">Lepas Semua</button>
+                  </div>
+                </div>
+                <div class="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 pr-1">
+                  ${PRODUCTS.length === 0 ? `<p class="text-[11px] text-stone-400 italic col-span-2">Belum ada produk di cabang ini.</p>` : PRODUCTS.map(p => {
+                    const checked = isGroupLinkedToProduct(group, p);
+                    const safePid = String(p.id).replace(/"/g, "&quot;");
+                    return `
+                      <label class="flex items-center gap-2 p-1.5 bg-white border border-stone-200 rounded-lg cursor-pointer hover:border-teal-400">
+                        <input type="checkbox" class="vg-assign-cb w-3.5 h-3.5 accent-teal-700" data-group-id="${String(group.id).replace(/"/g, '&quot;')}" value="${safePid}" ${checked ? 'checked' : ''}>
+                        <span class="text-[11px] font-medium text-stone-800 truncate">${p.name}</span>
+                      </label>
+                    `;
+                  }).join("")}
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-1">
+                  <button type="button" onclick="toggleGroupProductAssignPanel('${safeJsGid}')" class="px-3 py-1 bg-white border border-stone-300 rounded-lg text-[11px] font-semibold text-stone-600 cursor-pointer">Tutup</button>
+                  <button type="button" onclick="applyGroupProductAssignments('${safeJsGid}')" class="px-3 py-1 bg-teal-700 hover:bg-teal-800 text-white rounded-lg text-[11px] font-bold cursor-pointer">Simpan Koneksi Menu</button>
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join("");
+
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function toggleGroupProductAssignPanel(groupId) {
+      activeAssignProductGroupId = activeAssignProductGroupId === groupId ? null : groupId;
+      renderBranchVariationGroupsList();
+    }
+
+    function toggleAllGroupAssignCheckboxes(groupId, checked) {
+      document.querySelectorAll(`.vg-assign-cb[data-group-id="${groupId}"]`).forEach(cb => {
+        cb.checked = Boolean(checked);
+      });
+    }
+
+    function applyGroupProductAssignments(groupId) {
+      const group = VARIATION_GROUPS.find(g => g.id === groupId);
+      if (!group) return;
+
+      const selectedIds = new Set();
+      document.querySelectorAll(`.vg-assign-cb[data-group-id="${groupId}"]`).forEach(cb => {
+        if (cb.checked) selectedIds.add(String(cb.value));
+      });
+
+      let updatedCount = 0;
+      PRODUCTS.forEach(p => {
+        const shouldLink = selectedIds.has(String(p.id));
+        if (shouldLink) {
+          if (applyNormalizedGroupToProductOptions(p, group)) updatedCount++;
+        } else {
+          if (detachGroupFromProductOptions(p, group)) updatedCount++;
+        }
+      });
+
+      saveAdminProducts();
+      renderAdminMenuList();
+      renderProducts();
+      activeAssignProductGroupId = null;
+      renderBranchVariationGroupsList();
+      showToast(`Grup "${group.name}" dihubungkan ke ${selectedIds.size} menu & disinkronkan ke Cloud!`);
+    }
+
+    function promptDeleteBranchVariationGroup(groupId) {
+      pendingDeleteBranchVarGroupId = groupId;
+      renderBranchVariationGroupsList();
+    }
+
+    function cancelDeleteBranchVariationGroup() {
+      pendingDeleteBranchVarGroupId = null;
+      renderBranchVariationGroupsList();
+    }
+
+    function executeDeleteBranchVariationGroup(groupId) {
+      const target = VARIATION_GROUPS.find(g => g.id === groupId);
+      VARIATION_GROUPS = VARIATION_GROUPS.filter(g => g.id !== groupId);
+      pendingDeleteBranchVarGroupId = null;
+      if (activeAssignProductGroupId === groupId) activeAssignProductGroupId = null;
+      saveAdminVariationGroups();
+      renderBranchVariationGroupsList();
+      if (adminEditingProduct) renderAdminVarEditGroupsUI();
+      showToast(`Grup variasi "${target?.name || 'Grup'}" dihapus dari daftar cabang.`);
+    }
+
+    // ---------- MODAL 2: DIALOG CUSTOMISASI BUAT / EDIT GRUP VARIASI (POS STYLE) ----------
+    function openVariationGroupCustomizer(opts = {}) {
+      const mode = opts.mode || "create";
+      const attachToCurrentProduct = Boolean(opts.attachToCurrentProduct);
+      const editingCurrentProductIndex = Number.isInteger(opts.editingCurrentProductIndex)
+        ? opts.editingCurrentProductIndex
+        : null;
+
+      let sourceGroup = null;
+      if (mode === "edit" && editingCurrentProductIndex !== null && adminEditingOptions[editingCurrentProductIndex]) {
+        sourceGroup = normalizeVariationGroupRecord(adminEditingOptions[editingCurrentProductIndex], editingCurrentProductIndex);
+      } else if (mode === "edit" && opts.groupId) {
+        sourceGroup = VARIATION_GROUPS.find(g => g.id === opts.groupId);
+      }
+
+      vgEditorState = {
+        mode: sourceGroup ? "edit" : "create",
+        groupId: sourceGroup ? sourceGroup.id : null,
+        attachToCurrentProduct,
+        editingCurrentProductIndex,
+        options: sourceGroup && Array.isArray(sourceGroup.options) && sourceGroup.options.length > 0
+          ? sourceGroup.options.map(o => ({ name: o.name, price: Number(o.price) || 0 }))
+          : [{ name: "", price: 0 }]
+      };
+
+      const titleEl = document.getElementById("vgEditorTitle");
+      const nameInput = document.getElementById("vgEditorNameInput");
+      if (titleEl) titleEl.textContent = vgEditorState.mode === "edit" ? "Edit grup variasi" : "Buat grup variasi";
+      if (nameInput) nameInput.value = sourceGroup ? sourceGroup.name : "";
+
+      const ruleVal = sourceGroup && (sourceGroup.selectionType === "multiple" || sourceGroup.required === false)
+        ? "multiple_optional"
+        : "single_required";
+      const radioEl = document.querySelector(`input[name="vgSelectionRule"][value="${ruleVal}"]`);
+      if (radioEl) radioEl.checked = true;
+
+      renderVariationGroupCustomizerRows();
+
+      const backdrop = document.getElementById("variationGroupEditorModalBackdrop");
+      const panel = document.getElementById("variationGroupEditorModalPanel");
+      if (!backdrop || !panel) return;
+      backdrop.classList.remove("pointer-events-none", "opacity-0");
+      backdrop.classList.add("opacity-100");
+      panel.classList.remove("scale-95");
+      panel.classList.add("scale-100");
+      if (window.lucide) window.lucide.createIcons();
+      setTimeout(() => nameInput?.focus(), 60);
+    }
+
+    function closeVariationGroupCustomizer() {
+      const backdrop = document.getElementById("variationGroupEditorModalBackdrop");
+      const panel = document.getElementById("variationGroupEditorModalPanel");
+      if (!backdrop || !panel) return;
+      panel.classList.remove("scale-100");
+      panel.classList.add("scale-95");
+      backdrop.classList.remove("opacity-100");
+      backdrop.classList.add("opacity-0", "pointer-events-none");
+    }
+
+    function handleVariationGroupEditorBackdropClick(e) {
+      if (e.target === document.getElementById("variationGroupEditorModalBackdrop")) {
+        closeVariationGroupCustomizer();
+      }
+    }
+
+    function syncCustomizerDomRowsToState() {
+      const nameEls = document.querySelectorAll(".vg-opt-name-input");
+      const priceEls = document.querySelectorAll(".vg-opt-price-input");
+      const next = [];
+      nameEls.forEach((el, idx) => {
+        next.push({
+          name: el.value,
+          price: Math.max(0, Number(priceEls[idx]?.value) || 0)
+        });
+      });
+      if (next.length > 0) vgEditorState.options = next;
+    }
+
+    function renderVariationGroupCustomizerRows() {
+      const container = document.getElementById("vgEditorOptionsList");
+      if (!container) return;
+
+      container.innerHTML = vgEditorState.options.map((opt, idx) => `
+        <div class="flex items-center gap-2.5">
+          <input 
+            type="text" 
+            value="${String(opt.name || "").replace(/"/g, "&quot;")}" 
+            placeholder="Nama opsi (mis. Matang)" 
+            class="vg-opt-name-input flex-1 min-w-0 py-1.5 px-0.5 text-sm text-stone-900 bg-transparent border-0 border-b border-stone-300 focus:border-teal-700 focus:outline-none"
+          >
+          <input 
+            type="number" 
+            min="0" 
+            step="500"
+            value="${Number(opt.price) || 0}" 
+            placeholder="0" 
+            class="vg-opt-price-input w-24 py-1.5 px-0.5 text-sm text-stone-900 font-mono bg-transparent border-0 border-b border-stone-300 focus:border-teal-700 focus:outline-none"
+          >
+          <button 
+            type="button" 
+            onclick="removeVariationGroupOptionRow(${idx})" 
+            class="w-12 h-9 bg-teal-700 hover:bg-teal-800 text-white rounded-md flex items-center justify-center font-bold text-sm shrink-0 cursor-pointer transition shadow-2xs"
+            title="Hapus opsi ini"
+            aria-label="Hapus opsi"
+          >
+            ×
+          </button>
+        </div>
+      `).join("");
+    }
+
+    function addVariationGroupOptionRow() {
+      syncCustomizerDomRowsToState();
+      vgEditorState.options.push({ name: "", price: 0 });
+      renderVariationGroupCustomizerRows();
+      const inputs = document.querySelectorAll(".vg-opt-name-input");
+      if (inputs.length > 0) inputs[inputs.length - 1].focus();
+    }
+
+    function removeVariationGroupOptionRow(idx) {
+      syncCustomizerDomRowsToState();
+      if (vgEditorState.options.length <= 1) {
+        vgEditorState.options = [{ name: "", price: 0 }];
+      } else {
+        vgEditorState.options.splice(idx, 1);
+      }
+      renderVariationGroupCustomizerRows();
+    }
+
+    function saveVariationGroupCustomizer() {
+      syncCustomizerDomRowsToState();
+      const groupName = document.getElementById("vgEditorNameInput")?.value.trim() || "";
+      if (!groupName) {
+        showToast("Nama grup variasi wajib diisi!", 3000);
+        document.getElementById("vgEditorNameInput")?.focus();
+        return;
+      }
+
+      const cleanOpts = vgEditorState.options
+        .map(o => ({
+          name: String(o.name || "").trim(),
+          price: Math.max(0, Number(o.price) || 0)
+        }))
+        .filter(o => o.name.length > 0);
+
+      if (cleanOpts.length === 0) {
+        showToast("Masukkan minimal 1 nama opsi variasi!", 3000);
+        return;
+      }
+
+      const ruleChecked = document.querySelector('input[name="vgSelectionRule"]:checked')?.value || "single_required";
+      const isMultiple = ruleChecked === "multiple_optional";
+
+      const groupId = vgEditorState.groupId || normalizeSafeId(`${groupName}_${Date.now()}`, "vg", 0);
+      const savedGroup = normalizeVariationGroupRecord({
+        id: groupId,
+        name: groupName,
+        selectionType: isMultiple ? "multiple" : "single",
+        required: !isMultiple,
+        options: cleanOpts
+      });
+
+      const existingLibIdx = VARIATION_GROUPS.findIndex(g =>
+        g.id === savedGroup.id || g.name.trim().toLowerCase() === savedGroup.name.toLowerCase()
+      );
+      const oldLibGroup = existingLibIdx >= 0 ? VARIATION_GROUPS[existingLibIdx] : null;
+      if (existingLibIdx >= 0) {
+        VARIATION_GROUPS[existingLibIdx] = savedGroup;
+      } else {
+        VARIATION_GROUPS.push(savedGroup);
+      }
+      saveAdminVariationGroups();
+
+      if (vgEditorState.editingCurrentProductIndex !== null && adminEditingOptions[vgEditorState.editingCurrentProductIndex]) {
+        adminEditingOptions[vgEditorState.editingCurrentProductIndex] = JSON.parse(JSON.stringify(savedGroup));
+        renderAdminVarEditGroupsUI();
+      } else if (vgEditorState.attachToCurrentProduct && adminEditingProduct) {
+        const dupIdx = adminEditingOptions.findIndex(g =>
+          (g.id && g.id === savedGroup.id) || String(g.name || "").trim().toLowerCase() === savedGroup.name.toLowerCase()
+        );
+        if (dupIdx >= 0) {
+          adminEditingOptions[dupIdx] = JSON.parse(JSON.stringify(savedGroup));
+        } else {
+          adminEditingOptions.push(JSON.parse(JSON.stringify(savedGroup)));
+        }
+        renderAdminVarEditGroupsUI();
+      } else if (vgEditorState.mode === "edit" && oldLibGroup) {
+        let productsUpdated = false;
+        PRODUCTS.forEach(p => {
+          if (isGroupLinkedToProduct(oldLibGroup, p)) {
+            applyNormalizedGroupToProductOptions(p, savedGroup);
+            productsUpdated = true;
+          }
+        });
+        if (productsUpdated) {
+          saveAdminProducts();
+          renderAdminMenuList();
+          renderProducts();
+        }
+      }
+
+      renderBranchVariationGroupsList();
+      closeVariationGroupCustomizer();
+      showToast(`Grup variasi "${savedGroup.name}" berhasil disimpan!`);
+    }
+
+    // ---------- MODAL 3: ATUR VARIASI PER PRODUK (LIST GRUP TERHUBUNG + HAPUS) ----------
+    function openAdminVariationEditor(productId) {
       const product = PRODUCTS.find(p => p.id === productId);
       if (!product) return;
 
       adminEditingProduct = product;
-      adminEditingOptions = JSON.parse(JSON.stringify(product.options || []));
+      adminEditingOptions = buildOptionsFromModifierGroups(
+        Array.isArray(product.modifierGroups) && product.modifierGroups.length > 0
+          ? product.modifierGroups
+          : (product.options || [])
+      );
 
       const backdrop = document.getElementById("adminVarEditModalBackdrop");
       const panel = document.getElementById("adminVarEditModalPanel");
@@ -10149,88 +10962,112 @@ ${closing}`;
 
     function renderAdminVarEditGroupsUI() {
       const container = document.getElementById("adminVarGroupsList");
+      const availContainer = document.getElementById("adminVarAvailableGroupsList");
+      const countBadge = document.getElementById("adminVarLinkedCountBadge");
       if (!container) return;
+
+      if (countBadge) {
+        countBadge.textContent = `${adminEditingOptions.length} Grup`;
+      }
 
       if (!adminEditingOptions || adminEditingOptions.length === 0) {
         container.innerHTML = `
           <div class="text-center py-6 px-3 bg-stone-50 rounded-xl border border-dashed border-stone-300 text-stone-500">
-            <p class="font-bold text-xs text-stone-700">Belum Ada Variasi untuk Menu Ini</p>
+            <p class="font-bold text-xs text-stone-700">Belum Ada Grup Variasi Terhubung dengan Menu Ini</p>
+            <p class="text-[11px] text-stone-500 mt-1">Pilih grup variasi dari daftar di bawah atau buat grup baru.</p>
           </div>
         `;
-        return;
+      } else {
+        container.innerHTML = adminEditingOptions.map((rawGroup, gIdx) => {
+          const group = normalizeVariationGroupRecord(rawGroup, gIdx);
+          if (!group) return "";
+          const isMultiple = group.selectionType === "multiple" || group.required === false;
+          const ruleLabel = isMultiple ? "Boleh pilih beberapa (opsional)" : "Wajib pilih satu (radio)";
+          const optsText = group.options.map(o =>
+            Number(o.price) > 0 ? `${o.name} (+Rp ${Number(o.price).toLocaleString("id-ID")})` : o.name
+          ).join(" · ");
+
+          return `
+            <div class="p-3 bg-white border border-stone-200 rounded-xl flex items-start justify-between gap-2.5 shadow-2xs">
+              <div class="min-w-0 flex-1 space-y-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-bold text-xs text-stone-900">${group.name}</span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${isMultiple ? 'bg-amber-100 text-amber-900' : 'bg-teal-100 text-teal-800'}">
+                    ${ruleLabel}
+                  </span>
+                </div>
+                <p class="text-[11px] text-stone-600 leading-relaxed">${optsText}</p>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <button 
+                  type="button" 
+                  onclick="openVariationGroupCustomizer({ mode: 'edit', editingCurrentProductIndex: ${gIdx} })" 
+                  class="p-1.5 text-stone-500 hover:text-stone-900 hover:bg-stone-100 rounded-lg cursor-pointer transition"
+                  title="Edit grup variasi ini"
+                >
+                  <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+                </button>
+                <button 
+                  type="button" 
+                  onclick="removeVariationGroupFromCurrentItem(${gIdx})" 
+                  class="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer transition"
+                  title="Hapus variasi ini dari menu"
+                >
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join("");
       }
 
-      container.innerHTML = adminEditingOptions.map((group, gIdx) => {
-        const choicesString = (group.choices || []).join(", ");
-        return `
-          <div class="p-3 bg-white border border-stone-300 rounded-xl space-y-2 relative">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex-1">
-                <label class="block text-stone-500 text-[10px] uppercase font-bold mb-0.5">Nama Grup Variasi</label>
-                <input 
-                  type="text" 
-                  value="${group.name}" 
-                  onchange="updateEditingVarGroupName(${gIdx}, this.value)"
-                  class="w-full px-2 py-1 font-bold text-stone-900 border border-stone-200 rounded text-xs focus:ring-1 focus:ring-jp-crimson focus:outline-none"
-                >
-              </div>
+      if (availContainer) {
+        const linkedNames = new Set(adminEditingOptions.map(g => String(g?.name || "").trim().toLowerCase()));
+        const linkedIds = new Set(adminEditingOptions.map(g => String(g?.id || "").trim().toLowerCase()).filter(Boolean));
+        const unlinked = (VARIATION_GROUPS || []).filter(g => {
+          const gid = String(g.id || "").trim().toLowerCase();
+          const gname = String(g.name || "").trim().toLowerCase();
+          return !(gid && linkedIds.has(gid)) && !linkedNames.has(gname);
+        });
 
+        if (unlinked.length === 0) {
+          availContainer.innerHTML = `<span class="text-[11px] text-stone-400 italic">${VARIATION_GROUPS.length === 0 ? 'Belum ada grup di pustaka cabang.' : 'Semua grup cabang sudah terhubung ke menu ini.'}</span>`;
+        } else {
+          availContainer.innerHTML = unlinked.map(g => {
+            const safeJsGid = String(g.id).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+            return `
               <button 
                 type="button" 
-                onclick="removeVariationGroupFromCurrentItem(${gIdx})" 
-                class="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0 mt-3"
+                onclick="attachLibraryGroupToCurrentItem('${safeJsGid}')" 
+                class="px-2.5 py-1.5 bg-white hover:bg-teal-50 border border-stone-300 hover:border-teal-400 rounded-lg text-[11px] font-semibold text-stone-800 flex items-center gap-1 cursor-pointer transition"
               >
-                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                <i data-lucide="plus" class="w-3 h-3 text-teal-700"></i>
+                <span>${g.name}</span>
+                <span class="text-[10px] text-stone-400">(${(g.options || []).length} opsi)</span>
               </button>
-            </div>
-
-            <div>
-              <label class="block text-stone-500 text-[10px] uppercase font-bold mb-0.5">Daftar Pilihan (Pisahkan dengan koma ",")</label>
-              <textarea 
-                rows="2" 
-                onchange="updateEditingVarGroupChoices(${gIdx}, this.value)"
-                class="w-full px-2 py-1 text-stone-800 border border-stone-200 rounded text-xs font-mono focus:ring-1 focus:ring-jp-crimson focus:outline-none"
-              >${choicesString}</textarea>
-            </div>
-          </div>
-        `;
-      }).join("");
+            `;
+          }).join("");
+        }
+      }
 
       if (window.lucide) window.lucide.createIcons();
     }
 
-    function updateEditingVarGroupName(idx, val) {
-      if (adminEditingOptions[idx]) {
-        adminEditingOptions[idx].name = val.trim();
-      }
-    }
-
-    function updateEditingVarGroupChoices(idx, val) {
-      if (adminEditingOptions[idx]) {
-        adminEditingOptions[idx].choices = val.split(",").map(c => c.trim()).filter(c => c.length > 0);
+    function attachLibraryGroupToCurrentItem(groupId) {
+      const group = VARIATION_GROUPS.find(g => g.id === groupId);
+      if (!group) return;
+      const exists = adminEditingOptions.some(g =>
+        (g.id && g.id === group.id) || String(g.name || "").trim().toLowerCase() === group.name.trim().toLowerCase()
+      );
+      if (!exists) {
+        adminEditingOptions.push(JSON.parse(JSON.stringify(group)));
+        renderAdminVarEditGroupsUI();
       }
     }
 
     function removeVariationGroupFromCurrentItem(idx) {
       adminEditingOptions.splice(idx, 1);
       renderAdminVarEditGroupsUI();
-    }
-
-    function addNewVariationGroupToCurrentItem() {
-      adminEditingOptions.push({
-        name: "Pilihan Tambahan",
-        choices: ["Pilihan 1", "Pilihan 2"]
-      });
-      renderAdminVarEditGroupsUI();
-    }
-
-    function applyVariationTemplateToCurrentItem(tplKey) {
-      const template = VARIATION_TEMPLATES[tplKey];
-      if (template) {
-        adminEditingOptions = JSON.parse(JSON.stringify(template));
-        renderAdminVarEditGroupsUI();
-        showToast(`Template ${tplKey.toUpperCase()} diterapkan!`);
-      }
     }
 
     function removeAllVariationsFromCurrentItem() {
@@ -10243,11 +11080,8 @@ ${closing}`;
       if (!adminEditingProduct) return;
 
       const cleanOptions = adminEditingOptions
-        .filter(g => g.name && g.choices && g.choices.length > 0)
-        .map(g => ({
-          name: g.name.trim(),
-          choices: g.choices.map(c => c.trim()).filter(c => c.length > 0)
-        }));
+        .map((g, idx) => normalizeVariationGroupRecord(g, idx))
+        .filter(Boolean);
 
       adminEditingProduct.options = cleanOptions;
       adminEditingProduct.modifierGroups = buildModifierGroupsFromOptions(cleanOptions);
@@ -10400,6 +11234,259 @@ ${closing}`;
       renderHeroSlideshow();
       renderAdminSlideshowSettings();
       showToast("Urutan produk diubah");
+    }
+
+    function applyAdminMenuOrder(orderedVisibleIds) {
+      if (!Array.isArray(orderedVisibleIds) || orderedVisibleIds.length <= 1) return false;
+      const idSet = new Set(orderedVisibleIds.map(String));
+      const slots = [];
+      const itemById = new Map();
+      PRODUCTS.forEach((p, idx) => {
+        const pid = String(p.id);
+        if (idSet.has(pid)) {
+          slots.push(idx);
+          itemById.set(pid, p);
+        }
+      });
+      if (slots.length !== orderedVisibleIds.length) return false;
+
+      let changed = false;
+      slots.forEach((slotIdx, i) => {
+        const nextItem = itemById.get(String(orderedVisibleIds[i]));
+        if (nextItem && PRODUCTS[slotIdx] !== nextItem) {
+          PRODUCTS[slotIdx] = nextItem;
+          changed = true;
+        }
+      });
+      if (!changed) return false;
+
+      saveAdminProducts();
+      renderAdminMenuList();
+      renderProducts();
+      renderHeroSlideshow();
+      renderAdminSlideshowSettings();
+      showToast("Urutan produk diperbarui");
+      return true;
+    }
+
+    function startMenuDrag(event, productId) {
+      if (event.button !== undefined && event.button !== 0 && event.pointerType === "mouse") return;
+      const handleBtn = event.currentTarget;
+      const sourceRow = handleBtn?.closest(".admin-menu-row");
+      const listContainer = document.getElementById("adminMenuList");
+      if (!sourceRow || !listContainer) return;
+
+      const initialRows = Array.from(listContainer.querySelectorAll(".admin-menu-row"));
+      if (initialRows.length <= 1) return;
+
+      event.preventDefault();
+
+      const startY = event.clientY;
+      const initialIds = initialRows.map(r => r.getAttribute("data-product-id"));
+      const scrollParent = listContainer.closest(".overflow-y-auto");
+      let autoScrollRaf = null;
+      let latestClientY = event.clientY;
+      let hasMoved = false;
+      let floatingEl = null;
+
+      const getCurrentTranslateY = (el) => {
+        const tr = getComputedStyle(el).transform;
+        if (!tr || tr === "none") return 0;
+        try {
+          return new DOMMatrixReadOnly(tr).m42 || 0;
+        } catch (_e) {
+          return 0;
+        }
+      };
+
+      const updateVisibleOrderNumbers = () => {
+        const rowsNow = Array.from(listContainer.querySelectorAll(".admin-menu-row"));
+        rowsNow.forEach((r, idx) => {
+          const numEl = r.querySelector(".admin-menu-order-num");
+          if (numEl) numEl.textContent = `${idx + 1}.`;
+        });
+      };
+
+      const beginVisualDrag = () => {
+        const rect = sourceRow.getBoundingClientRect();
+        floatingEl = sourceRow.cloneNode(true);
+
+        // Sinkronkan nilai input/select agar tampilan kartu melayang identik
+        const origInputs = sourceRow.querySelectorAll("input, select, textarea");
+        const cloneInputs = floatingEl.querySelectorAll("input, select, textarea");
+        origInputs.forEach((inp, i) => {
+          if (cloneInputs[i]) cloneInputs[i].value = inp.value;
+        });
+
+        floatingEl.classList.remove("admin-menu-row");
+        floatingEl.style.position = "fixed";
+        floatingEl.style.left = `${rect.left}px`;
+        floatingEl.style.top = `${rect.top}px`;
+        floatingEl.style.width = `${rect.width}px`;
+        floatingEl.style.margin = "0";
+        floatingEl.style.zIndex = "9999";
+        floatingEl.style.pointerEvents = "none";
+        floatingEl.style.willChange = "transform";
+        floatingEl.style.transition = "box-shadow 150ms ease";
+        floatingEl.style.transform = `translate3d(0, ${latestClientY - startY}px, 0) scale(1.015)`;
+        floatingEl.classList.add("ring-2", "ring-amber-400", "shadow-2xl", "bg-white");
+        document.body.appendChild(floatingEl);
+
+        // Jadikan baris asal sebagai slot kosong (placeholder) beranimasi halus
+        Array.from(sourceRow.children).forEach(ch => {
+          ch.style.visibility = "hidden";
+        });
+        sourceRow.classList.remove("bg-white", "hover:bg-stone-50/80", "border-stone-200");
+        sourceRow.classList.add("bg-amber-50/70", "border-dashed", "border-amber-400");
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "grabbing";
+      };
+
+      const swapWithFlip = (targetRow, insertAfter) => {
+        const siblings = Array.from(listContainer.querySelectorAll(".admin-menu-row")).filter(r => r !== sourceRow);
+        const oldTops = new Map();
+        siblings.forEach(r => {
+          oldTops.set(r, r.getBoundingClientRect().top);
+        });
+
+        siblings.forEach(r => {
+          r.style.transition = "none";
+          r.style.transform = "";
+        });
+
+        if (insertAfter) {
+          listContainer.insertBefore(sourceRow, targetRow.nextSibling);
+        } else {
+          listContainer.insertBefore(sourceRow, targetRow);
+        }
+
+        const toAnimate = [];
+        siblings.forEach(r => {
+          const newTop = r.getBoundingClientRect().top;
+          const diff = oldTops.get(r) - newTop;
+          if (Math.abs(diff) > 0.5) {
+            r.style.transform = `translate3d(0, ${diff}px, 0)`;
+            toAnimate.push(r);
+          }
+        });
+
+        if (toAnimate.length > 0) {
+          void listContainer.offsetHeight;
+          toAnimate.forEach(r => {
+            r.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)";
+            r.style.transform = "translate3d(0, 0, 0)";
+          });
+        }
+
+        updateVisibleOrderNumbers();
+        if (floatingEl) {
+          const newIndex = Array.from(listContainer.querySelectorAll(".admin-menu-row")).indexOf(sourceRow);
+          const cloneNum = floatingEl.querySelector(".admin-menu-order-num");
+          if (cloneNum && newIndex >= 0) cloneNum.textContent = `${newIndex + 1}.`;
+        }
+      };
+
+      const checkAndSwapAtPointer = (clientY) => {
+        const allRows = Array.from(listContainer.querySelectorAll(".admin-menu-row"));
+        const sourceIdx = allRows.indexOf(sourceRow);
+        if (sourceIdx === -1) return;
+
+        // Cek apakah kursor melewati tengah item di atas sourceRow
+        for (let i = 0; i < sourceIdx; i++) {
+          const r = allRows[i];
+          const rect = r.getBoundingClientRect();
+          const layoutCenter = (rect.top - getCurrentTranslateY(r)) + rect.height / 2;
+          if (clientY < layoutCenter) {
+            swapWithFlip(r, false);
+            return;
+          }
+        }
+
+        // Cek apakah kursor melewati tengah item di bawah sourceRow
+        for (let i = allRows.length - 1; i > sourceIdx; i--) {
+          const r = allRows[i];
+          const rect = r.getBoundingClientRect();
+          const layoutCenter = (rect.top - getCurrentTranslateY(r)) + rect.height / 2;
+          if (clientY > layoutCenter) {
+            swapWithFlip(r, true);
+            return;
+          }
+        }
+      };
+
+      const stepAutoScroll = () => {
+        if (scrollParent && hasMoved) {
+          const rect = scrollParent.getBoundingClientRect();
+          const edge = 56;
+          if (latestClientY < rect.top + edge) {
+            const prev = scrollParent.scrollTop;
+            scrollParent.scrollTop -= 9;
+            if (scrollParent.scrollTop !== prev) checkAndSwapAtPointer(latestClientY);
+          } else if (latestClientY > rect.bottom - edge) {
+            const prev = scrollParent.scrollTop;
+            scrollParent.scrollTop += 9;
+            if (scrollParent.scrollTop !== prev) checkAndSwapAtPointer(latestClientY);
+          }
+        }
+        autoScrollRaf = requestAnimationFrame(stepAutoScroll);
+      };
+
+      const onPointerMove = (e) => {
+        latestClientY = e.clientY;
+        if (!hasMoved && Math.abs(e.clientY - startY) > 3) {
+          hasMoved = true;
+          beginVisualDrag();
+        }
+        if (!hasMoved) return;
+
+        if (floatingEl) {
+          floatingEl.style.transform = `translate3d(0, ${e.clientY - startY}px, 0) scale(1.015)`;
+        }
+        checkAndSwapAtPointer(e.clientY);
+      };
+
+      const cleanup = () => {
+        if (autoScrollRaf) cancelAnimationFrame(autoScrollRaf);
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", onPointerUp);
+        document.removeEventListener("pointercancel", onPointerCancel);
+        document.body.style.userSelect = "";
+        document.body.style.cursor = "";
+        if (floatingEl && floatingEl.parentNode) {
+          floatingEl.parentNode.removeChild(floatingEl);
+        }
+        floatingEl = null;
+        Array.from(sourceRow.children).forEach(ch => {
+          ch.style.visibility = "";
+        });
+        sourceRow.classList.remove("bg-amber-50/70", "border-dashed", "border-amber-400");
+        sourceRow.classList.add("bg-white", "hover:bg-stone-50/80", "border-stone-200");
+        listContainer.querySelectorAll(".admin-menu-row").forEach(r => {
+          r.style.transition = "";
+          r.style.transform = "";
+        });
+      };
+
+      const onPointerUp = () => {
+        const finalIds = Array.from(listContainer.querySelectorAll(".admin-menu-row")).map(r => r.getAttribute("data-product-id"));
+        const changed = hasMoved && finalIds.some((id, idx) => id !== initialIds[idx]);
+        cleanup();
+        if (changed) {
+          applyAdminMenuOrder(finalIds);
+        }
+      };
+
+      const onPointerCancel = () => {
+        cleanup();
+        renderAdminMenuList();
+      };
+
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerUp);
+      document.addEventListener("pointercancel", onPointerCancel);
+      if (scrollParent) {
+        autoScrollRaf = requestAnimationFrame(stepAutoScroll);
+      }
     }
 
     function toggleHeroFeatured(productId) {
@@ -11547,6 +12634,7 @@ ${closing}`;
       loadAdminProducts();
       loadAdminExtras();
       loadAdminPackages();
+      loadAdminVariationGroups();
       loadCartFromStorage();
     }
 
@@ -11703,12 +12791,36 @@ ${closing}`;
         hasMigratedLegacyJpIdsInCloud = true;
         window.FirestoreSync.syncProductsToFirestore(PRODUCTS, ACTIVE_BRANCH_ID);
       }
+      seedVariationGroupsFromProductsIfUnset();
       renderProducts();
       renderAdminMenuList();
       renderAdminSlideshowSettings();
       renderHeroSlideshow();
       updateCartUI();
     };
+
+    function seedVariationGroupsFromProductsIfUnset() {
+      const saved = localStorage.getItem(getBranchStorageKey("variation_groups"));
+      if (saved !== null) return;
+      if (!Array.isArray(PRODUCTS) || PRODUCTS.length === 0) return;
+      const discovered = [];
+      const seenNames = new Set();
+      PRODUCTS.forEach((p, pIdx) => {
+        (p.options || []).forEach((g, gIdx) => {
+          const norm = normalizeVariationGroupRecord(g, pIdx * 10 + gIdx);
+          if (norm && !seenNames.has(norm.name.toLowerCase())) {
+            seenNames.add(norm.name.toLowerCase());
+            discovered.push(norm);
+          }
+        });
+      });
+      if (discovered.length > 0 && VARIATION_GROUPS.length === 0) {
+        VARIATION_GROUPS = discovered;
+        window.VARIATION_GROUPS = VARIATION_GROUPS;
+        renderBranchVariationGroupsList();
+        if (adminEditingProduct) renderAdminVarEditGroupsUI();
+      }
+    }
 
     window.onFirestoreExtrasUpdate = function(newExtras, branchId) {
       if (branchId && branchId !== ACTIVE_BRANCH_ID) return;
@@ -11729,6 +12841,19 @@ ${closing}`;
       try { localStorage.setItem(getBranchStorageKey("packages"), JSON.stringify(PACKAGE_MENUS)); } catch (e) {}
       renderPackageMenuCards();
       renderAdminPackageList();
+    };
+
+    window.onFirestoreVariationGroupsUpdate = function(data, branchId) {
+      if (branchId && branchId !== ACTIVE_BRANCH_ID) return;
+      if (data && Array.isArray(data.groups)) {
+        VARIATION_GROUPS = data.groups.map((g, idx) => normalizeVariationGroupRecord(g, idx)).filter(Boolean);
+        window.VARIATION_GROUPS = VARIATION_GROUPS;
+        try { localStorage.setItem(getBranchStorageKey("variation_groups"), JSON.stringify(VARIATION_GROUPS)); } catch (e) {}
+        renderBranchVariationGroupsList();
+        if (adminEditingProduct) renderAdminVarEditGroupsUI();
+      } else {
+        seedVariationGroupsFromProductsIfUnset();
+      }
     };
 
     /**
@@ -11815,12 +12940,14 @@ ${closing}`;
         localStorage.setItem(getBranchStorageKey("products"), JSON.stringify(PRODUCTS));
         localStorage.setItem(getBranchStorageKey("extras"), JSON.stringify(EXTRAS));
         localStorage.setItem(getBranchStorageKey("packages"), JSON.stringify(PACKAGE_MENUS));
+        localStorage.setItem(getBranchStorageKey("variation_groups"), JSON.stringify(VARIATION_GROUPS));
 
         window.CONFIG = CONFIG;
         window.CATEGORIES = CATEGORIES;
         window.PRODUCTS = PRODUCTS;
         window.EXTRAS = EXTRAS;
         window.PACKAGE_MENUS = PACKAGE_MENUS;
+        window.VARIATION_GROUPS = VARIATION_GROUPS;
 
         // 4. Simpan ke Cloud Firestore cabang aktif secara paralel
         let cloudSynced = false;
@@ -11844,6 +12971,9 @@ ${closing}`;
             }
             if (window.FirestoreSync.syncPackagesToFirestore) {
               syncOps.push(window.FirestoreSync.syncPackagesToFirestore(PACKAGE_MENUS, ACTIVE_BRANCH_ID));
+            }
+            if (window.FirestoreSync.syncVariationGroupsToFirestore) {
+              syncOps.push(window.FirestoreSync.syncVariationGroupsToFirestore(VARIATION_GROUPS, ACTIVE_BRANCH_ID));
             }
 
             await Promise.race([
