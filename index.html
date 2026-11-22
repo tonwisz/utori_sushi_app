@@ -9,6 +9,9 @@
   <meta property="og:description" content="Pilih cabang terdekat, lihat katalog produk terbaru, atur variasi pesanan, dan pesan langsung via POS & WhatsApp." />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
+  <link id="dynamicFavicon" rel="icon" type="image/png" href="/assets/aistudio/logo_url_utori_803da0da.png" />
+  <link id="dynamicShortcutIcon" rel="shortcut icon" type="image/png" href="/assets/aistudio/logo_url_utori_803da0da.png" />
+  <link id="dynamicAppleTouchIcon" rel="apple-touch-icon" href="/assets/aistudio/logo_url_utori_803da0da.png" />
 
   <!-- Google Fonts: Plus Jakarta Sans, Playfair Display, Inter, Poppins, DM Serif Display, Space Grotesk & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2946,8 +2949,8 @@
           </div>
         </div>
 
-        <!-- Upload Logo & Gambar Banner Highlight -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <!-- Upload Logo, Favicon Tab Browser & Gambar Banner Highlight -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div class="bg-white p-4 rounded-xl border border-stone-200 space-y-2.5">
             <label class="block font-bold text-stone-800">Logo Brand (Navbar &amp; Footer)</label>
             <div class="flex items-center gap-3">
@@ -2955,6 +2958,20 @@
               <div class="flex-1 space-y-1.5">
                 <input type="file" id="themeBrandLogoFile" accept="image/*" onchange="handleThemeLogoUpload(this)" class="block w-full text-[11px] text-stone-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:bg-stone-100 file:font-bold cursor-pointer">
                 <button type="button" onclick="resetThemeLogo()" class="text-[11px] text-rose-600 hover:underline font-semibold cursor-pointer">Gunakan Logo Netral Default</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white p-4 rounded-xl border border-stone-200 space-y-2.5">
+            <label class="block font-bold text-stone-800">Logo Tab Browser (Favicon Cabang)</label>
+            <div class="flex items-center gap-3">
+              <img id="themeFaviconPreview" src="/assets/aistudio/logo_url_utori_803da0da.png" alt="Preview Favicon" class="w-12 h-12 rounded-full object-contain border border-stone-200 bg-stone-50 p-1">
+              <div class="flex-1 space-y-1.5">
+                <input type="file" id="themeFaviconFile" accept="image/*" onchange="handleThemeFaviconUpload(this)" class="block w-full text-[11px] text-stone-600 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:bg-stone-100 file:font-bold cursor-pointer">
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <button type="button" onclick="syncFaviconWithBrandLogo()" class="text-[11px] text-blue-600 hover:underline font-semibold cursor-pointer">Samakan dgn Logo Brand</button>
+                  <button type="button" onclick="resetThemeFavicon()" class="text-[11px] text-rose-600 hover:underline font-semibold cursor-pointer">Reset Default</button>
+                </div>
               </div>
             </div>
           </div>
@@ -4109,6 +4126,7 @@
     const DEFAULT_NEUTRAL_PLACEHOLDER_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 400'%3E%3Crect width='600' height='400' fill='%23e2e8f0'/%3E%3Crect x='210' y='115' width='180' height='135' rx='18' fill='%2394a3b8'/%3E%3Ccircle cx='262' cy='165' r='18' fill='%23f8fafc'/%3E%3Cpath d='M226 232l48-44 34 28 28-24 38 40z' fill='%23f8fafc'/%3E%3Ctext x='300' y='298' text-anchor='middle' fill='%23475569' font-family='sans-serif' font-size='20' font-weight='bold'%3EFoto Produk%3C/text%3E%3C/svg%3E";
     const DEFAULT_FALLBACK_FOOD_IMG = DEFAULT_NEUTRAL_PLACEHOLDER_IMG;
     const DEFAULT_BRAND_LOGO_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Cpath d='M20 22h24v5H20zm0 9h24v5H20zm0 9h16v5H20z' fill='%23ffffff'/%3E%3C/svg%3E";
+    const DEFAULT_FAVICON_URL = "/assets/aistudio/logo_url_utori_803da0da.png";
     const DEFAULT_HIGHLIGHT_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 500'%3E%3Crect width='800' height='500' fill='%231e293b'/%3E%3Ccircle cx='400' cy='220' r='84' fill='%23334155'/%3E%3Cpath d='M365 220h70M400 185v70' stroke='%2394a3b8' stroke-width='10' stroke-linecap='round'/%3E%3Ctext x='400' y='345' text-anchor='middle' fill='%23cbd5e1' font-family='sans-serif' font-size='22' font-weight='bold'%3EFoto Unggulan Toko%3C/text%3E%3C/svg%3E";
 
     /**
@@ -4195,6 +4213,7 @@
     const DEFAULT_THEME_CONFIG = {
       ...THEME_PRESETS.minimalist,
       logoDataUrl: DEFAULT_BRAND_LOGO_IMG,
+      faviconDataUrl: DEFAULT_FAVICON_URL,
       highlightImageUrl: DEFAULT_HIGHLIGHT_IMG
     };
 
@@ -4704,6 +4723,18 @@
       const logoSrc = t.logoDataUrl || DEFAULT_BRAND_LOGO_IMG;
       if (navLogo) navLogo.src = logoSrc;
       if (footerLogo) footerLogo.src = logoSrc;
+
+      const faviconSrc = t.faviconDataUrl || DEFAULT_FAVICON_URL;
+      const faviconMime = faviconSrc.startsWith("data:image/svg+xml")
+        ? "image/svg+xml"
+        : (faviconSrc.startsWith("data:image/jpeg") ? "image/jpeg" : "image/png");
+      ["dynamicFavicon", "dynamicShortcutIcon", "dynamicAppleTouchIcon"].forEach((id) => {
+        const linkEl = document.getElementById(id);
+        if (linkEl) {
+          linkEl.href = faviconSrc;
+          if (id !== "dynamicAppleTouchIcon") linkEl.type = faviconMime;
+        }
+      });
 
       const highlightImg = document.getElementById("highlightSectionImage");
       if (highlightImg) highlightImg.src = t.highlightImageUrl || DEFAULT_HIGHLIGHT_IMG;
@@ -7932,6 +7963,8 @@ ${closing}`;
       setVal("themeRadiusButton", t.radiusButton);
       const logoPrev = document.getElementById("themeBrandLogoPreview");
       if (logoPrev) logoPrev.src = t.logoDataUrl || DEFAULT_BRAND_LOGO_IMG;
+      const favPrev = document.getElementById("themeFaviconPreview");
+      if (favPrev) favPrev.src = t.faviconDataUrl || DEFAULT_FAVICON_URL;
       const hiPrev = document.getElementById("themeHighlightImagePreview");
       if (hiPrev) hiPrev.src = t.highlightImageUrl || DEFAULT_HIGHLIGHT_IMG;
     }
@@ -7987,6 +8020,71 @@ ${closing}`;
       if (fileEl) fileEl.value = "";
       applyThemeTokens();
       showToast("Logo dikembalikan ke logo netral default.");
+    }
+
+    function compressFaviconFile(file, size = 128) {
+      return new Promise((resolve, reject) => {
+        if (!file || !file.type.startsWith("image/")) {
+          return reject(new Error("Silakan pilih file gambar yang valid (PNG, JPG, WEBP, atau SVG)!"));
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return reject(new Error("Gagal menginisialisasi canvas favicon."));
+            ctx.clearRect(0, 0, size, size);
+            const scale = Math.min(size / img.width, size / img.height);
+            const w = Math.round(img.width * scale);
+            const h = Math.round(img.height * scale);
+            const x = Math.round((size - w) / 2);
+            const y = Math.round((size - h) / 2);
+            ctx.drawImage(img, x, y, w, h);
+            resolve(canvas.toDataURL("image/png"));
+          };
+          img.onerror = () => reject(new Error("File ikon tidak dapat dibaca."));
+          img.src = e.target.result;
+        };
+        reader.onerror = () => reject(new Error("Gagal membaca file lokal."));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function handleThemeFaviconUpload(input) {
+      const file = input?.files?.[0];
+      if (!file) return;
+      try {
+        const compressed = await compressFaviconFile(file, 128);
+        THEME_CONFIG.faviconDataUrl = compressed;
+        const prev = document.getElementById("themeFaviconPreview");
+        if (prev) prev.src = compressed;
+        applyThemeTokens();
+        showToast("Logo Tab Browser cabang diperbarui! Klik 'Terapkan & Simpan Tema' untuk menyimpan.", 2800);
+      } catch (err) {
+        showToast(err?.message || "Gagal memproses favicon.", 3000);
+      }
+    }
+
+    function syncFaviconWithBrandLogo() {
+      const brandLogo = THEME_CONFIG.logoDataUrl || DEFAULT_BRAND_LOGO_IMG;
+      THEME_CONFIG.faviconDataUrl = brandLogo;
+      const prev = document.getElementById("themeFaviconPreview");
+      if (prev) prev.src = brandLogo;
+      applyThemeTokens();
+      showToast("Logo Tab Browser disamakan dengan Logo Brand cabang ini!", 2500);
+    }
+
+    function resetThemeFavicon() {
+      THEME_CONFIG.faviconDataUrl = DEFAULT_FAVICON_URL;
+      const prev = document.getElementById("themeFaviconPreview");
+      if (prev) prev.src = DEFAULT_FAVICON_URL;
+      const fileEl = document.getElementById("themeFaviconFile");
+      if (fileEl) fileEl.value = "";
+      applyThemeTokens();
+      showToast("Logo Tab Browser dikembalikan ke logo default.");
     }
 
     async function handleThemeHighlightImgUpload(input) {
