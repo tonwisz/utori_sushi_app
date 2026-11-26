@@ -973,7 +973,7 @@
   </style>
   <script type="module" src="/src/deliveryMap.ts"></script>
 </head>
-<body class="bg-theme-canvas text-theme-primary font-sans antialiased selection:bg-jp-crimson selection:text-white">
+<body class="bg-theme-canvas text-theme-primary font-sans antialiased selection:bg-jp-crimson selection:text-white overflow-x-hidden">
 
   <!-- Google Maps Platform Quota Exceeded Top Bar -->
   <div id="gmpQuotaBanner" class="hidden bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
@@ -995,29 +995,29 @@
 
   <!-- ==================== 1. NAVBAR / HEADER ==================== -->
   <header class="sticky top-0 z-40 bg-theme-surface/95 backdrop-blur-md border-b border-stone-200/80 shadow-xs">
-    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16 sm:h-20 gap-3 sm:gap-5">
+    <div class="max-w-7xl mx-auto px-3 sm:px-4 lg:px-5">
+      <div class="flex items-center justify-between h-16 sm:h-20 gap-2 xl:gap-3">
         
         <!-- Logo / Brand Zone -->
-        <a href="#" class="flex items-center gap-2.5 group shrink-0">
+        <a href="#" class="flex items-center gap-2 group min-w-0 shrink">
           <img 
             src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%232563eb'/><path d='M20 22h24v5H20zm0 9h24v5H20zm0 9h16v5H20z' fill='%23ffffff'/></svg>" 
             id="navBrandLogo" 
             alt="Logo Toko" 
-            class="h-10 sm:h-11 w-10 sm:w-11 object-contain rounded-xl shadow-xs group-hover:scale-105 transition-transform bg-white border border-stone-200/70" 
+            class="h-9 sm:h-10 w-9 sm:w-10 shrink-0 object-contain rounded-xl shadow-xs group-hover:scale-105 transition-transform bg-white border border-stone-200/70" 
           />
           <div class="flex flex-col min-w-0">
-            <span id="navStoreName" class="font-display text-lg sm:text-xl font-black tracking-tight text-theme-primary group-hover:text-theme-accent transition-colors whitespace-nowrap truncate max-w-[160px] sm:max-w-[220px]">
+            <span id="navStoreName" class="font-display text-base sm:text-lg font-black tracking-tight text-theme-primary group-hover:text-theme-accent transition-colors whitespace-nowrap truncate max-w-[140px] sm:max-w-[160px] xl:max-w-[175px]">
               Nama Toko Anda
             </span>
-            <span id="navStoreTagline" class="text-[10px] sm:text-[11px] font-semibold text-theme-muted uppercase tracking-widest -mt-0.5 truncate max-w-[160px] sm:max-w-[220px]">
+            <span id="navStoreTagline" class="text-[9.5px] sm:text-[10px] font-semibold text-theme-muted uppercase tracking-wider -mt-0.5 truncate max-w-[140px] sm:max-w-[160px] xl:max-w-[175px]">
               Katalog Produk &amp; Pemesanan Online
             </span>
           </div>
         </a>
 
         <!-- Desktop Navigation Links -->
-        <nav class="hidden lg:flex items-center gap-5 text-xs xl:text-sm font-semibold text-stone-600">
+        <nav class="hidden xl:flex items-center gap-3.5 2xl:gap-4 text-[13px] font-semibold text-stone-600 shrink-0">
           <a id="navLinkMenu" href="#katalog-menu" class="hover:text-theme-accent transition-colors whitespace-nowrap shrink-0">Katalog</a>
           <a id="navLinkHighlight" href="#omakase-highlight" class="hover:text-theme-accent transition-colors whitespace-nowrap shrink-0">Produk Unggulan</a>
           <a id="navLinkFeatures" href="#keunggulan" class="hover:text-theme-accent transition-colors whitespace-nowrap shrink-0">Keunggulan</a>
@@ -1026,10 +1026,10 @@
         </nav>
 
         <!-- Search & Cart Zone -->
-        <div class="flex items-center gap-2 sm:gap-2.5 shrink-0">
+        <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
           
           <!-- Search Input Desktop -->
-          <div class="relative hidden sm:block w-40 lg:w-52">
+          <div class="relative hidden sm:block w-36 md:w-44 lg:w-48 xl:w-40 2xl:w-44">
             <span class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-stone-400">
               <i data-lucide="search" class="w-3.5 h-3.5"></i>
             </span>
@@ -1053,21 +1053,21 @@
           <!-- Tombol Akses Admin (Manager ke atas) -->
           <button 
             onclick="handleAdminButtonClick()" 
-            class="hidden lg:flex items-center gap-1.5 px-2.5 py-2 text-stone-700 hover:text-stone-900 hover:bg-stone-100 radius-theme-btn text-xs font-semibold transition cursor-pointer border border-stone-200 whitespace-nowrap shrink-0"
+            class="hidden lg:flex items-center gap-1.5 px-2.5 py-2 text-stone-700 hover:text-stone-900 hover:bg-stone-100 radius-theme-btn text-xs font-semibold transition cursor-pointer border border-stone-200 whitespace-nowrap shrink-0 max-w-[140px] xl:max-w-[155px]"
             title="Login Manager ke atas untuk kustomisasi cabang, tema & katalog"
           >
-            <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5 text-amber-600"></i>
-            <span id="topAdminBtnText">Login Manager</span>
+            <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5 text-amber-600 shrink-0"></i>
+            <span id="topAdminBtnText" class="truncate">Login Manager</span>
           </button>
 
           <!-- Cart Button -->
           <button 
             id="cartBtn" 
             onclick="openCartModal()" 
-            class="group relative flex items-center gap-2.5 p-1.5 sm:py-1.5 sm:pl-1.5 sm:pr-3.5 bg-stone-900 hover:bg-stone-800 border border-stone-700/80 text-white radius-theme-btn shadow-sm transition-all duration-300 active:scale-95 cursor-pointer shrink-0"
+            class="group relative flex items-center gap-2 p-1.5 sm:py-1.5 sm:pl-1.5 sm:pr-3 bg-stone-900 hover:bg-stone-800 border border-stone-700/80 text-white radius-theme-btn shadow-sm transition-all duration-300 active:scale-95 cursor-pointer shrink-0"
             aria-label="Buka Keranjang Pesanan"
           >
-            <div class="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-theme-accent text-white shadow-md transition-transform duration-300 group-hover:scale-105">
+            <div class="relative flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-theme-accent text-white shadow-md transition-transform duration-300 group-hover:scale-105 shrink-0">
               <i data-lucide="shopping-cart" class="w-4 h-4 sm:w-4.5 sm:h-4.5"></i>
               <span 
                 id="cartBadge" 
@@ -1078,7 +1078,7 @@
             </div>
             <div class="hidden sm:flex flex-col text-left leading-none">
               <span class="text-[9px] text-stone-300 uppercase tracking-wider font-bold">Keranjang</span>
-              <span class="text-xs font-mono font-black text-amber-300 tabular-nums tracking-tight mt-0.5" id="cartHeaderTotal">
+              <span class="text-xs font-mono font-black text-amber-300 tabular-nums tracking-tight mt-0.5 whitespace-nowrap" id="cartHeaderTotal">
                 Rp 0
               </span>
             </div>
@@ -1087,7 +1087,7 @@
           <!-- Mobile Menu Toggle Button -->
           <button 
             onclick="toggleMobileMenu()" 
-            class="lg:hidden p-2 text-stone-700 hover:text-theme-accent hover:bg-stone-100 rounded-lg"
+            class="xl:hidden p-2 text-stone-700 hover:text-theme-accent hover:bg-stone-100 rounded-lg shrink-0"
             aria-label="Buka Menu"
           >
             <i data-lucide="menu" class="w-5 h-5"></i>
@@ -1114,8 +1114,8 @@
       </div>
 
       <!-- Mobile Menu Dropdown -->
-      <div id="mobileMenu" class="hidden lg:hidden border-t border-stone-100 py-3 space-y-1 text-xs font-semibold text-stone-700">
-        <button onclick="handleAdminButtonClick(); closeMobileMenu();" class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 text-amber-900 font-bold">
+      <div id="mobileMenu" class="hidden xl:hidden border-t border-stone-100 py-3 space-y-1 text-xs font-semibold text-stone-700">
+        <button onclick="handleAdminButtonClick(); closeMobileMenu();" class="w-full lg:hidden text-left flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 text-amber-900 font-bold">
           <i data-lucide="settings" class="w-4 h-4 text-amber-600"></i>
           <span>Kelola &amp; Kustomisasi Website (Manager+)</span>
         </button>
@@ -1880,12 +1880,12 @@
     class="fixed inset-0 z-[70] bg-black/60 opacity-0 pointer-events-none"
     onclick="handleBackdropClick(event)"
   >
-    <div class="fixed inset-y-0 right-0 max-w-full flex pl-3 sm:pl-10">
+    <div class="fixed inset-y-0 right-0 max-w-full h-full flex pl-3 sm:pl-10">
       
       <!-- Drawer Panel -->
       <div 
         id="cartDrawerPanel" 
-        class="w-screen max-w-md bg-white flex flex-col transform translate-x-full border-l border-stone-800/15"
+        class="w-screen max-w-md h-full max-h-[100dvh] bg-white flex flex-col overflow-hidden transform translate-x-full border-l border-stone-800/15"
       >
         <!-- Modal Header -->
         <div class="px-4 py-3 sm:px-5 sm:py-3.5 bg-jp-sumi text-white flex items-center justify-between border-b border-stone-800 shrink-0">
@@ -1924,44 +1924,47 @@
           </button>
         </div>
 
-        <!-- Live Order POS Status Notice -->
-        <div id="posLiveOrderBanner" class="hidden mx-3 sm:mx-4 mt-3 shrink-0 rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-[11px] text-emerald-900 space-y-0.5">
-          <div class="flex items-center justify-between font-bold">
-            <span class="flex items-center gap-1.5">
-              <span id="posOrderStatusDot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span id="posOrderStatusTitle">Terkirim ke POS Kasir</span>
-            </span>
-            <span id="posOrderIdBadge" class="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700"></span>
+        <!-- Unified Scrollable Body (Banner + Daftar Item + Form Checkout) -->
+        <div class="flex-1 min-h-0 overflow-y-auto flex flex-col">
+
+          <!-- Live Order POS Status Notice -->
+          <div id="posLiveOrderBanner" class="hidden mx-3 sm:mx-4 mt-3 shrink-0 rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-2 text-[11px] text-emerald-900 space-y-0.5">
+            <div class="flex items-center justify-between font-bold">
+              <span class="flex items-center gap-1.5">
+                <span id="posOrderStatusDot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span id="posOrderStatusTitle">Terkirim ke POS Kasir</span>
+              </span>
+              <span id="posOrderIdBadge" class="font-mono text-[10px] bg-white px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-700"></span>
+            </div>
+            <p id="posOrderStatusDesc" class="text-[10px] opacity-90 leading-snug">
+              Pesanan Anda sudah masuk ke layar kasir POS cabang (Status: PENDING).
+            </p>
           </div>
-          <p id="posOrderStatusDesc" class="text-[10px] opacity-90 leading-snug">
-            Pesanan Anda sudah masuk ke layar kasir POS cabang (Status: PENDING).
-          </p>
-        </div>
 
-        <!-- Cart Items List Container -->
-        <div id="cartItemsContainer" class="flex-1 min-h-[145px] overflow-y-auto p-3 sm:p-4 space-y-2.5 divide-y divide-stone-100">
-          <!-- Populated by JavaScript -->
-        </div>
-
-        <!-- Empty Cart Notice -->
-        <div id="cartEmptyNotice" class="hidden flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <div class="w-14 h-14 rounded-2xl bg-stone-100 border border-stone-200/80 flex items-center justify-center text-jp-crimson mb-2.5 shadow-sm">
-            <i data-lucide="shopping-cart" class="w-7 h-7"></i>
+          <!-- Cart Items List Container -->
+          <div id="cartItemsContainer" class="p-3 sm:p-4 space-y-2.5 divide-y divide-stone-100 shrink-0">
+            <!-- Populated by JavaScript -->
           </div>
-          <h4 class="font-display font-bold text-stone-800 text-sm">Keranjang Anda Masih Kosong</h4>
-          <p class="text-xs text-stone-500 mt-0.5 mb-3 max-w-xs">
-            Silakan pilih produk favorit Anda dari katalog cabang ini terlebih dahulu!
-          </p>
-          <button 
-            onclick="closeCartModal(); window.location.hash='#katalog-menu';" 
-            class="px-3.5 py-1.5 bg-jp-crimson hover:bg-jp-redDark text-white rounded-lg text-xs font-bold shadow-xs transition cursor-pointer"
-          >
-            Pilih Produk Sekarang
-          </button>
-        </div>
 
-        <!-- Order Information Form & Summary -->
-        <div id="cartCheckoutFooter" class="border-t border-stone-200 bg-stone-50 p-3 sm:p-3.5 space-y-2 shrink-0 max-h-[60vh] overflow-y-auto">
+          <!-- Empty Cart Notice -->
+          <div id="cartEmptyNotice" class="hidden flex-1 flex flex-col items-center justify-center p-6 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-stone-100 border border-stone-200/80 flex items-center justify-center text-jp-crimson mb-2.5 shadow-sm">
+              <i data-lucide="shopping-cart" class="w-7 h-7"></i>
+            </div>
+            <h4 class="font-display font-bold text-stone-800 text-sm">Keranjang Anda Masih Kosong</h4>
+            <p class="text-xs text-stone-500 mt-0.5 mb-3 max-w-xs">
+              Silakan pilih produk favorit Anda dari katalog cabang ini terlebih dahulu!
+            </p>
+            <button 
+              onclick="closeCartModal(); window.location.hash='#katalog-menu';" 
+              class="px-3.5 py-1.5 bg-jp-crimson hover:bg-jp-redDark text-white rounded-lg text-xs font-bold shadow-xs transition cursor-pointer"
+            >
+              Pilih Produk Sekarang
+            </button>
+          </div>
+
+          <!-- Order Information Form & Summary -->
+          <div id="cartCheckoutFooter" class="border-t border-stone-200 bg-stone-50 p-3 sm:p-3.5 space-y-2 shrink-0">
           
           <!-- Compact Customer Details Box -->
           <div class="bg-white p-2.5 rounded-lg border border-stone-200 text-[11px] space-y-2">
@@ -2216,8 +2219,13 @@
             </div>
           </div>
 
-          <!-- Bottom Action Bar: TOTAL HARGA & TOMBOL CHECKOUT -->
-          <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-stone-200">
+          </div> <!-- /#cartCheckoutFooter -->
+
+        </div> <!-- /Unified Scrollable Body -->
+
+        <!-- Sticky Pinned Bottom Action Bar: TOTAL HARGA & TOMBOL CHECKOUT -->
+        <div id="cartCheckoutActionBar" class="shrink-0 border-t border-stone-200 bg-white px-3.5 py-2.5 sm:px-4 sm:py-3 space-y-1.5 shadow-[0_-6px_16px_-6px_rgba(0,0,0,0.1)]">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex flex-col">
               <span class="text-[10px] text-stone-500 leading-none">Total Pembayaran:</span>
               <span class="font-mono font-bold text-sm sm:text-base text-jp-crimson tabular-nums" id="cartTotalText">
@@ -2268,7 +2276,6 @@
               </button>
             </div>
           </div>
-
         </div>
 
       </div>
@@ -6264,6 +6271,7 @@
       const cartItemsContainer = document.getElementById("cartItemsContainer");
       const cartEmptyNotice = document.getElementById("cartEmptyNotice");
       const cartCheckoutFooter = document.getElementById("cartCheckoutFooter");
+      const cartCheckoutActionBar = document.getElementById("cartCheckoutActionBar");
       const cartTotalText = document.getElementById("cartTotalText");
       const cartMenuSubtotalText = document.getElementById("cartMenuSubtotalText");
       const cartExtrasTotalText = document.getElementById("cartExtrasTotalText");
@@ -6298,10 +6306,12 @@
       if (totalCount === 0) {
         if (cartItemsContainer) cartItemsContainer.classList.add("hidden");
         if (cartCheckoutFooter) cartCheckoutFooter.classList.add("hidden");
+        if (cartCheckoutActionBar) cartCheckoutActionBar.classList.add("hidden");
         if (cartEmptyNotice) cartEmptyNotice.classList.remove("hidden");
       } else {
         if (cartItemsContainer) cartItemsContainer.classList.remove("hidden");
         if (cartCheckoutFooter) cartCheckoutFooter.classList.remove("hidden");
+        if (cartCheckoutActionBar) cartCheckoutActionBar.classList.remove("hidden");
         if (cartEmptyNotice) cartEmptyNotice.classList.add("hidden");
 
         if (cartItemsContainer) {
